@@ -54,6 +54,43 @@ git clone https://github.com/meenusinha/agentic-orchestration-framework.git agen
 cd agentic-orchestration
 ```
 
+#### Download the embedding model (required)
+
+The framework uses a local embedding model for RAG. You must copy the model files
+into the repo **before running setup**. Without them the MCP servers will fail to start.
+
+Copy the `all-MiniLM-L6-v2` model folder into the repo so the layout looks like this:
+
+```
+agentic-orchestration/
+└── models/
+    └── all-MiniLM-L6-v2/
+        ├── config.json
+        ├── tokenizer.json
+        ├── tokenizer_config.json
+        ├── vocab.txt
+        ├── special_tokens_map.json
+        ├── sentence_bert_config.json
+        ├── modules.json
+        ├── pytorch_model.bin      ← ~90 MB
+        └── 1_Pooling/
+            └── config.json
+```
+
+If you have internet access on the machine, you can download directly:
+
+```bash
+pip install huggingface_hub
+huggingface-cli download sentence-transformers/all-MiniLM-L6-v2 \
+    --local-dir models/all-MiniLM-L6-v2
+```
+
+If not (e.g. an air-gapped office laptop), download on a machine with internet using
+the command above, then copy the entire `models/` folder across via USB or shared drive.
+
+`setup.py` automatically wires the absolute path to this folder into every generated
+`mcp.json` — no manual path configuration needed.
+
 #### Install on Mac / Linux
 
 Check you have Python 3.11 or newer:
@@ -132,16 +169,11 @@ cp -r repo-agent/knowledge/  /path/to/my-repo/knowledge/
 cp -r repo-agent/.github/    /path/to/my-repo/.github/
 ```
 
-Then open `/path/to/my-repo/mcp/config.yaml` and fill in the three required fields:
+Then open `/path/to/my-repo/mcp/config.yaml` and fill in the required fields:
 
 ```yaml
 repo_name: frontend          # must EXACTLY match the name in orchestrator/mcp/config.yaml
 display_name: Frontend
-components:
-  - AuthModule               # key classes / modules in this repo (shown to the AI)
-  - Router
-  - SessionManager
-
 src_path: ./src              # path to source code (relative to repo root, or absolute)
                              # set to null to skip source indexing
 knowledge_path: ./knowledge  # where you drop your .md docs (default is fine)
@@ -217,10 +249,17 @@ This generates two files per repo:
 
 ### Step 6 — Open each repo in VS Code
 
-Open a new VS Code window for each repo. You can do this from any terminal (env vars
-are not required — everything uses absolute paths from step 5):
+Open a new VS Code window for each repo. You must launch VS Code **from the terminal
+where your venv is active** — VS Code inherits the Python from that terminal, and all
+MCP servers run with it.
 
 ```bash
+# Make sure the venv is active first
+source /path/to/agentic-orchestration/.venv/bin/activate   # Mac / Linux
+# or
+/path/to/agentic-orchestration/.venv/Scripts/activate       # Windows
+
+# Then open each repo
 code /path/to/frontend
 code /path/to/backend
 code /path/to/payments
@@ -228,6 +267,9 @@ code /path/to/payments
 
 VS Code automatically loads `.vscode/mcp.json` from the workspace folder.
 All MCP servers (orchestrator + all repos) are available immediately.
+
+> **Do not open VS Code from Finder or the Dock** — it won't inherit the venv and
+> the MCP servers will fail with `ModuleNotFoundError`.
 
 > **First-time MCP activation**: VS Code may show a notification asking you to allow
 > the MCP servers. Click **Allow** for each one.
@@ -333,4 +375,5 @@ agentic-orchestration-framework/        ← this repo (cloned once)
 | `ModuleNotFoundError: chromadb` | Run `pip install -r requirements.txt` in your venv |
 | VS Code launched from wrong terminal (wrong Python) | Run `source .venv/bin/activate` then `code .` from that same terminal |
 | RAG returns nothing | Check that `knowledge/` has `.md` files; delete `.chroma_db/` to re-index |
+| `OSError: [Errno 2] No such file or directory: '.../all-MiniLM-L6-v2'` | Model files missing — copy `models/all-MiniLM-L6-v2/` into the repo root and re-run `setup.py` |
 | `path does not exist` warning in setup.py | The path in `orchestrator/mcp/config.yaml` is wrong or the repo isn't cloned yet |

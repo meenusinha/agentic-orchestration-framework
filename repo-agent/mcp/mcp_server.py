@@ -5,6 +5,7 @@ This file never needs to be edited. Just update config.yaml and run setup.py.
 
 Launch: python mcp/mcp_server.py   (done automatically by VS Code via mcp.json)
 """
+import os
 import sys
 from pathlib import Path
 
@@ -27,7 +28,6 @@ with open(CONFIG_PATH) as f:
 
 REPO_NAME   = _cfg["repo_name"]
 DISPLAY     = _cfg.get("display_name", REPO_NAME)
-COMPONENTS  = ", ".join(_cfg.get("components", []))
 
 REPO_ROOT   = Path(__file__).parent.parent.resolve()
 
@@ -38,7 +38,8 @@ def _resolve(p: str) -> Path:
 SRC_DIR       = _resolve(_cfg["src_path"]) if _cfg.get("src_path") else None
 KNOWLEDGE_DIR = _resolve(_cfg.get("knowledge_path", "./knowledge"))
 CHROMA_DB     = str(REPO_ROOT / ".chroma_db")
-EXTRA_EXT     = _cfg.get("extra_extensions", [])
+EXTRA_EXT       = _cfg.get("extra_extensions", [])
+EMBEDDING_MODEL = os.environ.get("EMBEDDING_MODEL_PATH", "all-MiniLM-L6-v2")
 
 # ── Build RAG index ───────────────────────────────────────────────────────────
 log(REPO_NAME, "INFO", f"Starting {DISPLAY} MCP server")
@@ -48,6 +49,7 @@ rag = RepoRAG(
     src_path=str(SRC_DIR) if SRC_DIR else None,
     chroma_persist_dir=CHROMA_DB,
     extra_extensions=EXTRA_EXT,
+    embedding_model=EMBEDDING_MODEL,
 )
 rag.build_or_load_index()
 

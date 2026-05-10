@@ -9,11 +9,6 @@ repo_name: my-repo
 # Human-readable name shown in routing output and Copilot chat
 display_name: My Repo
 
-# Key classes, modules, or subsystems in this repo (shown to the AI agent)
-components:
-  - MyComponent
-  - AnotherComponent
-
 # Path to source code to index (relative to this repo's root, or absolute).
 # Supports: .py .js .ts .java .go .rs .cpp .c .h .cs .rb .swift .kt .php .scala
 # Set to null to skip source indexing (use only knowledge/ docs).

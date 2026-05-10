@@ -26,7 +26,9 @@ except ImportError:
     sys.exit(1)
 
 ORCHESTRATOR_DIR = Path(__file__).parent.resolve()
-CONFIG_PATH = ORCHESTRATOR_DIR / "mcp" / "config.yaml"
+FRAMEWORK_DIR    = ORCHESTRATOR_DIR.parent
+MODEL_PATH       = str(FRAMEWORK_DIR / "models" / "all-MiniLM-L6-v2")
+CONFIG_PATH      = ORCHESTRATOR_DIR / "mcp" / "config.yaml"
 
 if not CONFIG_PATH.exists():
     print(f"ERROR: Config not found at {CONFIG_PATH}")
@@ -84,6 +86,7 @@ def _all_servers() -> dict:
             "env": {
                 "PYTHONPATH": str(r["path"] / "mcp"),
                 "DEMO_LOG_FILE": log_file,
+                "EMBEDDING_MODEL_PATH": MODEL_PATH,
             },
         }
     return servers
@@ -104,16 +107,6 @@ def _write_copilot_instructions(repo: dict) -> Path:
     display      = repo["display_name"]
     repo_path    = repo["path"]
 
-    # Read components from the repo's own config.yaml (best-effort)
-    repo_config_path = repo_path / "mcp" / "config.yaml"
-    components_str = ""
-    if repo_config_path.exists():
-        with open(repo_config_path) as f:
-            rc = yaml.safe_load(f)
-        comps = rc.get("components", [])
-        if comps:
-            components_str = f"\nYour components: **{'**, **'.join(comps)}**\n"
-
     # Peer repos (all repos except this one)
     peers = [r for r in resolved if r["name"] != name]
     peer_query_examples = "\n".join(
@@ -126,7 +119,7 @@ def _write_copilot_instructions(repo: dict) -> Path:
         # {display} Repo Agent
 
         You are the AI agent for the **{display}** repository.
-        {components_str}
+
         ---
 
         ## Feature Request Agent Flow
