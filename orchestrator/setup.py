@@ -35,6 +35,11 @@ if not CONFIG_PATH.exists():
     print("       Have you edited orchestrator/mcp/config.yaml?")
     sys.exit(1)
 
+if not Path(MODEL_PATH).exists():
+    print(f"ERROR: Embedding model not found at {MODEL_PATH}")
+    print("       Copy the all-MiniLM-L6-v2 model folder into models/ before running setup.")
+    sys.exit(1)
+
 with open(CONFIG_PATH) as f:
     config = yaml.safe_load(f)
 
@@ -75,6 +80,7 @@ def _all_servers() -> dict:
             "env": {
                 "PYTHONPATH": orchestrator_pythonpath,
                 "DEMO_LOG_FILE": log_file,
+                "EMBEDDING_MODEL_PATH": MODEL_PATH,
             },
         }
     }
@@ -220,7 +226,7 @@ print(f"""
 Setup complete.
 
 Next:
-  1. Open each repo in VS Code (no terminal env vars needed)
+  1. Activate the venv, then open each repo in VS Code from that terminal
   2. Switch Copilot chat to Agent mode
   3. Type a feature request
   4. Watch the live log:
