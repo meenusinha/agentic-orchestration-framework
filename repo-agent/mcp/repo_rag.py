@@ -1,5 +1,14 @@
 """Generic RepoRAG — indexes knowledge/ docs and source code, no external dependencies."""
+import sys
 from pathlib import Path
+
+# On systems with sqlite3 < 3.35.0 (e.g. RHEL8), swap in pysqlite3-binary
+# before chromadb loads. Install with: pip install pysqlite3-binary
+try:
+    import pysqlite3
+    sys.modules["sqlite3"] = pysqlite3
+except ImportError:
+    pass  # system sqlite3 is new enough, no swap needed
 
 import chromadb
 from chromadb.utils.embedding_functions import SentenceTransformerEmbeddingFunction
