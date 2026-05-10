@@ -19,6 +19,11 @@ from pathlib import Path
 FRAMEWORK_DIR = Path(__file__).parent.resolve()
 sys.path.insert(0, str(FRAMEWORK_DIR / "orchestrator" / "mcp"))
 
+# Remove system PYTHONPATH so subprocesses use only the venv's packages.
+# On some systems (e.g. RHEL with scientific software stacks) PYTHONPATH points
+# to system packages compiled for a different Python, causing import errors.
+os.environ.pop("PYTHONPATH", None)
+
 # Set env vars before any subprocess calls — inherited by all spawned MCP servers
 os.environ["EMBEDDING_MODEL_PATH"] = str(FRAMEWORK_DIR / "models" / "all-MiniLM-L6-v2")
 
