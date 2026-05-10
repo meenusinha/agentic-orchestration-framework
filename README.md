@@ -51,7 +51,7 @@ Clone or download this repo to any location on your machine:
 
 ```bash
 git clone <this-repo-url> agentic-orchestration
-cd agentic-orchestration/framework
+cd agentic-orchestration
 ```
 
 Install Python dependencies (one shared environment for all repos):
@@ -172,7 +172,7 @@ Orchestrator setup — 3 repo(s) found in config
       copilot-instructions → /Users/alice/projects/payments/.github/copilot-instructions.md
 
   ✓ orchestrator
-      mcp.json             → /Users/alice/agentic-orchestration/framework/orchestrator/.vscode/mcp.json
+      mcp.json             → /Users/alice/agentic-orchestration/orchestrator/.vscode/mcp.json
 
 Setup complete.
 ```
@@ -268,9 +268,9 @@ The next time the MCP server starts (next VS Code session or MCP restart), it re
 ## File reference
 
 ```
-framework/
+agentic-orchestration-framework/        ← this repo (cloned once)
 ├── requirements.txt                     ← install once, shared by all repos
-├── orchestrator/                        ← clone/keep once; never copied into your repos
+├── orchestrator/                        ← never copied into your repos
 │   ├── mcp/
 │   │   ├── config.yaml                  ← ★ EDIT THIS: list your repos + paths
 │   │   ├── router.py                    ← generic routing logic (do not edit)
