@@ -1,0 +1,24 @@
+# Orchestrator configuration — the ONLY file you edit to register your repos.
+#
+# Steps:
+#   1. Fill in the repos list below (one entry per repo you want to orchestrate)
+#   2. Run:  python orchestrator/setup.py
+#   3. Open each repo in VS Code — MCP servers are ready
+#   4. Watch logs:  tail -f /tmp/mcp-orchestration.log
+
+repos:
+  - name: repo-one                        # unique identifier (no spaces, matches repo-agent config.yaml)
+    display_name: Repo One                # human-readable name shown in routing output
+    path: /absolute/path/to/repo-one     # absolute path, OR relative to this file (e.g. ../repo-one)
+
+  - name: repo-two
+    display_name: Repo Two
+    path: /absolute/path/to/repo-two
+
+  # Add more repos here — no limit
+  # - name: repo-three
+  #   display_name: Repo Three
+  #   path: /absolute/path/to/repo-three
+
+# Log file — update this to a path you prefer, then tail -f it in a terminal
+log_file: /tmp/mcp-orchestration.log

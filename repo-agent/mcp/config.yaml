@@ -1,0 +1,27 @@
+# Repo agent configuration — the ONLY file you edit per repo.
+#
+# After editing, run:  python ../orchestrator/setup.py
+# (That generates the .vscode/mcp.json with all peer servers wired up.)
+
+# Must match the name used in orchestrator/mcp/config.yaml
+repo_name: my-repo
+
+# Human-readable name shown in routing output and Copilot chat
+display_name: My Repo
+
+# Key classes, modules, or subsystems in this repo (shown to the AI agent)
+components:
+  - MyComponent
+  - AnotherComponent
+
+# Path to source code to index (relative to this repo's root, or absolute).
+# Supports: .py .js .ts .java .go .rs .cpp .c .h .cs .rb .swift .kt .php .scala
+# Set to null to skip source indexing (use only knowledge/ docs).
+src_path: ./src
+
+# Additional file extensions to index (on top of the defaults above)
+# extra_extensions: [".graphql", ".proto", ".thrift"]
+
+# Path where you drop your .md documentation files
+# (relative to this repo's root, or absolute)
+knowledge_path: ./knowledge
