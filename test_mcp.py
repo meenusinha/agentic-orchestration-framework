@@ -11,11 +11,16 @@ Usage (from repo root, with venv active):
 Output is printed to stdout AND saved to feature_analysis.md
 Paste feature_analysis.md content into Copilot chat for analysis.
 """
+import os
 import sys
 from datetime import date
 from pathlib import Path
 
-sys.path.insert(0, str(Path(__file__).parent / "orchestrator" / "mcp"))
+FRAMEWORK_DIR = Path(__file__).parent.resolve()
+sys.path.insert(0, str(FRAMEWORK_DIR / "orchestrator" / "mcp"))
+
+# Set env vars before any subprocess calls — inherited by all spawned MCP servers
+os.environ["EMBEDDING_MODEL_PATH"] = str(FRAMEWORK_DIR / "models" / "all-MiniLM-L6-v2")
 
 try:
     import yaml
@@ -39,6 +44,8 @@ repos = config.get("repos", [])
 if not repos:
     print("ERROR: No repos listed in orchestrator/mcp/config.yaml")
     sys.exit(1)
+
+os.environ["DEMO_LOG_FILE"] = config.get("log_file", "/tmp/mcp-orchestration.log")
 
 if len(sys.argv) < 2:
     print("Usage: python test_mcp.py \"your feature request here\"")
