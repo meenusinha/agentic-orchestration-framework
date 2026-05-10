@@ -174,7 +174,7 @@ Then open `/path/to/my-repo/mcp/config.yaml` and fill in the required fields:
 ```yaml
 repo_name: frontend          # must EXACTLY match the name in orchestrator/mcp/config.yaml
 display_name: Frontend
-src_path: ./src              # path to source code (relative to repo root, or absolute)
+src_path: ./src              # path, glob (e.g. ./BB-*/*/com), or list of paths
                              # set to null to skip source indexing
 knowledge_path: ./knowledge  # where you drop your .md docs (default is fine)
 ```

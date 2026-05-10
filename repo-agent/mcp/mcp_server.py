@@ -5,6 +5,7 @@ This file never needs to be edited. Just update config.yaml and run setup.py.
 
 Launch: python mcp/mcp_server.py   (done automatically by VS Code via mcp.json)
 """
+import glob as _glob
 import os
 import sys
 from pathlib import Path
@@ -35,7 +36,21 @@ def _resolve(p: str) -> Path:
     path = Path(p)
     return path if path.is_absolute() else (REPO_ROOT / path).resolve()
 
-SRC_DIR       = _resolve(_cfg["src_path"]) if _cfg.get("src_path") else None
+def _expand_src_path(raw) -> list[Path]:
+    """Resolve src_path to a list of concrete directories, expanding glob patterns."""
+    if raw is None:
+        return []
+    entries = raw if isinstance(raw, list) else [raw]
+    result = []
+    for entry in entries:
+        if any(c in str(entry) for c in ("*", "?", "[")):
+            matches = _glob.glob(str(REPO_ROOT / entry), recursive=True)
+            result.extend(Path(m) for m in sorted(matches) if Path(m).is_dir())
+        else:
+            result.append(_resolve(str(entry)))
+    return result
+
+SRC_DIRS      = _expand_src_path(_cfg.get("src_path"))
 KNOWLEDGE_DIR = _resolve(_cfg.get("knowledge_path", "./knowledge"))
 CHROMA_DB     = str(REPO_ROOT / ".chroma_db")
 EXTRA_EXT       = _cfg.get("extra_extensions", [])
@@ -46,7 +61,7 @@ log(REPO_NAME, "INFO", f"Starting {DISPLAY} MCP server")
 rag = RepoRAG(
     repo_name=REPO_NAME,
     knowledge_path=str(KNOWLEDGE_DIR),
-    src_path=str(SRC_DIR) if SRC_DIR else None,
+    src_paths=[str(d) for d in SRC_DIRS] if SRC_DIRS else None,
     chroma_persist_dir=CHROMA_DB,
     extra_extensions=EXTRA_EXT,
     embedding_model=EMBEDDING_MODEL,

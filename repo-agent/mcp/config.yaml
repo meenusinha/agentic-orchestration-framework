@@ -9,9 +9,13 @@ repo_name: my-repo
 # Human-readable name shown in routing output and Copilot chat
 display_name: My Repo
 
-# Path to source code to index (relative to this repo's root, or absolute).
-# Supports: .py .js .ts .java .go .rs .cpp .c .h .cs .rb .swift .kt .php .scala
-# Set to null to skip source indexing (use only knowledge/ docs).
+# Path(s) to source code to index. Relative to repo root, absolute, or a glob pattern.
+# Glob example (all 'com' folders under BB-* modules): src_path: ./BB-*/*/com
+# Multiple explicit paths:
+#   src_path:
+#     - ./module-a/src
+#     - ./module-b/src
+# Set to null to skip source indexing entirely.
 src_path: ./src
 
 # Additional file extensions to index (on top of the defaults above)

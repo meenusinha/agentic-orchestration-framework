@@ -22,7 +22,7 @@ class RepoRAG:
         self,
         repo_name: str,
         knowledge_path: str,
-        src_path: str = None,
+        src_paths: list[str] = None,
         embedding_model: str = "all-MiniLM-L6-v2",
         chroma_persist_dir: str = ".chroma_db",
         top_k: int = 3,
@@ -30,7 +30,7 @@ class RepoRAG:
     ):
         self.repo_name = repo_name
         self.knowledge_path = Path(knowledge_path)
-        self.src_path = Path(src_path) if src_path else None
+        self.src_paths = [Path(p) for p in src_paths] if src_paths else []
         self.top_k = top_k
         self._extensions = _DEFAULT_EXTENSIONS | set(extra_extensions or [])
 
@@ -72,7 +72,8 @@ class RepoRAG:
         log(self.repo_name, "INDEX", f"Docs index ready: {len(docs)} chunks total")
 
     def _index_code(self) -> None:
-        if not self.src_path or not self.src_path.exists():
+        active = [p for p in self.src_paths if p.exists()]
+        if not active:
             log(self.repo_name, "INDEX", "No source path configured — skipping code index")
             return
 
@@ -85,22 +86,23 @@ class RepoRAG:
             )
             return
 
-        log(self.repo_name, "INDEX", f"Building code index from {self.src_path}")
+        log(self.repo_name, "INDEX", f"Building code index from {len(active)} path(s)")
         self._code_collection = self._client.create_collection(
             name=name, embedding_function=self._ef
         )
         docs, ids = [], []
-        for src_file in sorted(self.src_path.rglob("*")):
-            if src_file.suffix not in self._extensions:
-                continue
-            try:
-                text = src_file.read_text(encoding="utf-8", errors="ignore")
-            except OSError:
-                continue
-            chunks = [p.strip() for p in text.split("\n\n") if len(p.strip()) > 40]
-            for i, chunk in enumerate(chunks):
-                docs.append(chunk)
-                ids.append(f"code_{src_file.stem}_{i}_{len(docs)}")
+        for src_dir in active:
+            for src_file in sorted(src_dir.rglob("*")):
+                if src_file.suffix not in self._extensions:
+                    continue
+                try:
+                    text = src_file.read_text(encoding="utf-8", errors="ignore")
+                except OSError:
+                    continue
+                chunks = [p.strip() for p in text.split("\n\n") if len(p.strip()) > 40]
+                for i, chunk in enumerate(chunks):
+                    docs.append(chunk)
+                    ids.append(f"code_{src_file.stem}_{i}_{len(docs)}")
         if docs:
             self._code_collection.add(documents=docs, ids=ids)
         log(self.repo_name, "INDEX", f"Code index ready: {len(docs)} chunks total")
