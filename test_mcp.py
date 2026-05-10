@@ -28,6 +28,8 @@ except ImportError:
     print("ERROR: PyYAML not installed. Run: pip install pyyaml")
     sys.exit(1)
 
+import json
+import subprocess
 from router import _mcp_call, OrchestratorRouter
 
 CONFIG_PATH = Path(__file__).parent / "orchestrator" / "mcp" / "config.yaml"
@@ -53,12 +55,55 @@ if len(sys.argv) < 2:
 
 feature_request = " ".join(sys.argv[1:])
 
-# ── Resolve repo scripts ──────────────────────────────────────────────────────
+# ── Helpers ───────────────────────────────────────────────────────────────────
 def _repo_script(repo: dict) -> Path | None:
     raw = repo["path"]
     p = Path(raw) if Path(raw).is_absolute() else (CONFIG_PATH.parent / raw).resolve()
     script = p / "mcp" / "mcp_server.py"
     return script if script.exists() else None
+
+def _diagnose_server(script: Path) -> None:
+    """Run the MCP server and print stderr so startup errors are visible."""
+    init_msg = (
+        json.dumps({"jsonrpc": "2.0", "id": 1, "method": "initialize",
+                    "params": {"protocolVersion": "2024-11-05", "capabilities": {},
+                               "clientInfo": {"name": "test", "version": "1.0"}}})
+        + "\n"
+    )
+    proc = subprocess.run(
+        [sys.executable, str(script)],
+        input=init_msg, capture_output=True, text=True, timeout=30,
+        env=os.environ,
+    )
+    if proc.stderr.strip():
+        print(f"  SERVER STDERR:\n{proc.stderr.strip()}")
+    if proc.stdout.strip():
+        print(f"  SERVER STDOUT:\n{proc.stdout.strip()[:300]}")
+
+# ── Pre-flight: check each MCP server starts cleanly ─────────────────────────
+print("\nPre-flight check — testing each MCP server startup...")
+any_failed = False
+for repo in repos:
+    name = repo["name"]
+    script = _repo_script(repo)
+    if not script:
+        print(f"  [{name}] SKIP — mcp_server.py not found at expected path")
+        continue
+    print(f"  [{name}] starting server...", end=" ", flush=True)
+    try:
+        _diagnose_server(script)
+        print("ok")
+    except subprocess.TimeoutExpired:
+        print("TIMEOUT — server did not respond within 30s")
+        any_failed = True
+    except Exception as e:
+        print(f"ERROR — {e}")
+        any_failed = True
+
+if any_failed:
+    print("\nFix the server errors above before continuing.")
+    sys.exit(1)
+print()
 
 # ── Step 1: Run orchestrator routing ─────────────────────────────────────────
 print(f"\nQuerying orchestrator router...", flush=True)
