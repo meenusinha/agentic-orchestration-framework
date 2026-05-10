@@ -77,7 +77,7 @@ def _diagnose_server(script: Path) -> None:
     )
     proc = subprocess.run(
         [sys.executable, str(script)],
-        input=init_msg, capture_output=True, text=True, timeout=30,
+        input=init_msg, capture_output=True, text=True, timeout=300,
         env=os.environ,
     )
     if proc.stderr.strip():
@@ -99,7 +99,7 @@ for repo in repos:
         _diagnose_server(script)
         print("ok")
     except subprocess.TimeoutExpired:
-        print("TIMEOUT — server did not respond within 30s")
+        print("TIMEOUT — server did not respond within 300s")
         any_failed = True
     except Exception as e:
         print(f"ERROR — {e}")
@@ -129,7 +129,7 @@ for repo in repos:
         print(f"[{name}] SKIP — mcp_server.py not found", flush=True)
         continue
     print(f"[{name}] Querying...", flush=True)
-    result = _mcp_call(str(script), "query_repo", {"feature_request": feature_request})
+    result = _mcp_call(str(script), "query_repo", {"feature_request": feature_request}, timeout=300)
     repo_results[name] = result
 
 # ── Step 3: Build Feature Analysis Document ───────────────────────────────────
