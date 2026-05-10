@@ -36,8 +36,10 @@ def _resolve(p: str) -> Path:
     path = Path(p)
     return path if path.is_absolute() else (REPO_ROOT / path).resolve()
 
-def _expand_src_path(raw) -> list[Path]:
-    """Resolve src_path to a list of concrete directories, expanding glob patterns."""
+def _expand_paths(raw, default: str = None) -> list[Path]:
+    """Resolve a path config value to a list of concrete directories, expanding glob patterns."""
+    if raw is None:
+        raw = default
     if raw is None:
         return []
     entries = raw if isinstance(raw, list) else [raw]
@@ -50,9 +52,9 @@ def _expand_src_path(raw) -> list[Path]:
             result.append(_resolve(str(entry)))
     return result
 
-SRC_DIRS      = _expand_src_path(_cfg.get("src_path"))
-KNOWLEDGE_DIR = _resolve(_cfg.get("knowledge_path", "./knowledge"))
-CHROMA_DB     = str(REPO_ROOT / ".chroma_db")
+SRC_DIRS       = _expand_paths(_cfg.get("src_path"))
+KNOWLEDGE_DIRS = _expand_paths(_cfg.get("knowledge_path"), default="./knowledge")
+CHROMA_DB      = str(REPO_ROOT / ".chroma_db")
 EXTRA_EXT       = _cfg.get("extra_extensions", [])
 EMBEDDING_MODEL = os.environ.get("EMBEDDING_MODEL_PATH", "all-MiniLM-L6-v2")
 
@@ -60,7 +62,7 @@ EMBEDDING_MODEL = os.environ.get("EMBEDDING_MODEL_PATH", "all-MiniLM-L6-v2")
 log(REPO_NAME, "INFO", f"Starting {DISPLAY} MCP server")
 rag = RepoRAG(
     repo_name=REPO_NAME,
-    knowledge_path=str(KNOWLEDGE_DIR),
+    knowledge_paths=[str(d) for d in KNOWLEDGE_DIRS] if KNOWLEDGE_DIRS else None,
     src_paths=[str(d) for d in SRC_DIRS] if SRC_DIRS else None,
     chroma_persist_dir=CHROMA_DB,
     extra_extensions=EXTRA_EXT,

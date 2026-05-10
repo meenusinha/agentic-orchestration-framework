@@ -10,7 +10,7 @@ repo_name: my-repo
 display_name: My Repo
 
 # Path(s) to source code to index. Relative to repo root, absolute, or a glob pattern.
-# Glob example (all 'com' folders under BB-* modules): src_path: ./BB-*/*/com
+# Glob example (all src folders under module subdirectories): src_path: ./modules/*/src
 # Multiple explicit paths:
 #   src_path:
 #     - ./module-a/src
@@ -21,6 +21,11 @@ src_path: ./src
 # Additional file extensions to index (on top of the defaults above)
 # extra_extensions: [".graphql", ".proto", ".thrift"]
 
-# Path where you drop your .md documentation files
-# (relative to this repo's root, or absolute)
+# Path(s) to documentation folders containing .md files. Supports glob patterns
+# and lists, same as src_path. All .md files are searched recursively.
+# Glob example: knowledge_path: ./modules/*/docs
+# Multiple paths:
+#   knowledge_path:
+#     - ./knowledge
+#     - ./modules/*/docs
 knowledge_path: ./knowledge

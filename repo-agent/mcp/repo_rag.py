@@ -21,7 +21,7 @@ class RepoRAG:
     def __init__(
         self,
         repo_name: str,
-        knowledge_path: str,
+        knowledge_paths: list[str] = None,
         src_paths: list[str] = None,
         embedding_model: str = "all-MiniLM-L6-v2",
         chroma_persist_dir: str = ".chroma_db",
@@ -29,7 +29,7 @@ class RepoRAG:
         extra_extensions: list[str] = None,
     ):
         self.repo_name = repo_name
-        self.knowledge_path = Path(knowledge_path)
+        self.knowledge_paths = [Path(p) for p in knowledge_paths] if knowledge_paths else []
         self.src_paths = [Path(p) for p in src_paths] if src_paths else []
         self.top_k = top_k
         self._extensions = _DEFAULT_EXTENSIONS | set(extra_extensions or [])
@@ -53,20 +53,26 @@ class RepoRAG:
             )
             return
 
-        log(self.repo_name, "INDEX", f"Building docs index from {self.knowledge_path}")
+        active = [p for p in self.knowledge_paths if p.exists()]
+        log(self.repo_name, "INDEX", f"Building docs index from {len(active)} path(s)")
         self._docs_collection = self._client.create_collection(
             name=name, embedding_function=self._ef
         )
         docs, ids = [], []
-        for md_file in sorted(self.knowledge_path.glob("*.md")):
-            if md_file.name.lower() == "readme.md":
-                continue
-            text = md_file.read_text(encoding="utf-8", errors="ignore")
-            chunks = [p.strip() for p in text.split("\n\n") if len(p.strip()) > 40]
-            for i, chunk in enumerate(chunks):
-                docs.append(chunk)
-                ids.append(f"doc_{md_file.stem}_{i}")
-            log(self.repo_name, "INDEX", f"  {md_file.name}: {len(chunks)} chunks")
+        seen_ids = set()
+        for knowledge_dir in active:
+            for md_file in sorted(knowledge_dir.rglob("*.md")):
+                if md_file.name.lower() == "readme.md":
+                    continue
+                text = md_file.read_text(encoding="utf-8", errors="ignore")
+                chunks = [p.strip() for p in text.split("\n\n") if len(p.strip()) > 40]
+                for i, chunk in enumerate(chunks):
+                    uid = f"doc_{md_file.stem}_{i}_{len(docs)}"
+                    if uid not in seen_ids:
+                        docs.append(chunk)
+                        ids.append(uid)
+                        seen_ids.add(uid)
+                log(self.repo_name, "INDEX", f"  {md_file.name}: {len(chunks)} chunks")
         if docs:
             self._docs_collection.add(documents=docs, ids=ids)
         log(self.repo_name, "INDEX", f"Docs index ready: {len(docs)} chunks total")
