@@ -47,18 +47,48 @@ Developer → feature request in VS Code Copilot (Agent mode)
 
 ### Step 1 — Get the framework
 
-Clone or download this repo to any location on your machine:
+Clone this repo to any location on your machine:
 
 ```bash
-git clone <this-repo-url> agentic-orchestration
+git clone https://github.com/meenusinha/agentic-orchestration-framework.git agentic-orchestration
 cd agentic-orchestration
 ```
 
-Install Python dependencies (one shared environment for all repos):
+#### Install on Mac / Linux
+
+Check you have Python 3.11 or newer:
 
 ```bash
+python3 --version
+```
+
+If not installed, on Mac:
+```bash
+brew install python@3.11
+```
+
+On Ubuntu / Debian:
+```bash
+sudo apt update && sudo apt install python3.11 python3.11-venv
+```
+
+Create a virtual environment and install dependencies:
+
+```bash
+python3 -m venv .venv
+source .venv/bin/activate
+pip install -r requirements.txt
+```
+
+> **Important**: always activate this venv (`source .venv/bin/activate`) before
+> running `setup.py` or any MCP server manually. VS Code must also be launched
+> from a terminal where the venv is active so it picks up the right Python.
+
+#### Install on Windows
+
+```powershell
 python -m venv .venv
-source .venv/bin/activate        # Windows: .venv\Scripts\activate
+.venv\Scripts\activate
 pip install -r requirements.txt
 ```
 
@@ -301,6 +331,6 @@ agentic-orchestration-framework/        ← this repo (cloned once)
 | MCP servers not appearing in Copilot | Reload VS Code window (`Cmd+Shift+P` → Reload Window) |
 | `ModuleNotFoundError: yaml` | Run `pip install pyyaml` in your venv |
 | `ModuleNotFoundError: chromadb` | Run `pip install -r requirements.txt` in your venv |
-| VS Code launched from wrong terminal (wrong Python) | Launch VS Code from the terminal where you activated the venv |
+| VS Code launched from wrong terminal (wrong Python) | Run `source .venv/bin/activate` then `code .` from that same terminal |
 | RAG returns nothing | Check that `knowledge/` has `.md` files; delete `.chroma_db/` to re-index |
 | `path does not exist` warning in setup.py | The path in `orchestrator/mcp/config.yaml` is wrong or the repo isn't cloned yet |
