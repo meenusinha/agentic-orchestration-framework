@@ -32,3 +32,8 @@ knowledge_path: ./knowledge
 
 # Number of results returned per query from docs and code collections (default: 3)
 top_k: 3
+
+# Similarity threshold — maximum L2 distance to accept a result (lower = tighter).
+# With normalised embeddings: ~0.5 is tight, ~1.0 is moderate, null = no filtering.
+# Keyword search always runs in addition and is unaffected by this threshold.
+similarity_threshold: null

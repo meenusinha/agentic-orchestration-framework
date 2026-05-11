@@ -56,8 +56,9 @@ SRC_DIRS       = _expand_paths(_cfg.get("src_path"))
 KNOWLEDGE_DIRS = _expand_paths(_cfg.get("knowledge_path"), default="./knowledge")
 CHROMA_DB       = str(REPO_ROOT / ".chroma_db")
 EXTRA_EXT       = _cfg.get("extra_extensions", [])
-TOP_K           = _cfg.get("top_k", 3)
-EMBEDDING_MODEL = os.environ.get("EMBEDDING_MODEL_PATH", "all-MiniLM-L6-v2")
+TOP_K                = _cfg.get("top_k", 3)
+SIMILARITY_THRESHOLD = _cfg.get("similarity_threshold", None)
+EMBEDDING_MODEL      = os.environ.get("EMBEDDING_MODEL_PATH", "all-MiniLM-L6-v2")
 
 # ── Build RAG index ───────────────────────────────────────────────────────────
 log(REPO_NAME, "INFO", f"Starting {DISPLAY} MCP server")
@@ -68,6 +69,7 @@ rag = RepoRAG(
     chroma_persist_dir=CHROMA_DB,
     extra_extensions=EXTRA_EXT,
     top_k=TOP_K,
+    similarity_threshold=SIMILARITY_THRESHOLD,
     embedding_model=EMBEDDING_MODEL,
 )
 rag.build_or_load_index()

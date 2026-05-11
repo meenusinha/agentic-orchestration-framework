@@ -1,5 +1,6 @@
 """Generic RepoRAG — indexes knowledge/ docs and source code, no external dependencies."""
 import os
+import re
 import sys
 from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
@@ -35,12 +36,14 @@ class RepoRAG:
         embedding_model: str = "all-MiniLM-L6-v2",
         chroma_persist_dir: str = ".chroma_db",
         top_k: int = 3,
+        similarity_threshold: float = None,
         extra_extensions: list[str] = None,
     ):
         self.repo_name = repo_name
         self.knowledge_paths = [Path(p) for p in knowledge_paths] if knowledge_paths else []
         self.src_paths = [Path(p) for p in src_paths] if src_paths else []
         self.top_k = top_k
+        self._threshold = similarity_threshold   # L2 distance ceiling; None = no filtering
         self._extensions = _DEFAULT_EXTENSIONS | set(extra_extensions or [])
 
         log(repo_name, "INDEX", f"Initializing ChromaDB at {chroma_persist_dir}")
@@ -190,29 +193,79 @@ class RepoRAG:
         self._index_code()
         log(self.repo_name, "INDEX", "RAG index ready")
 
+    def _apply_threshold(self, snippets: list[str], distances: list[float]) -> list[str]:
+        """Drop results whose L2 distance exceeds the configured threshold."""
+        if self._threshold is None:
+            return snippets
+        kept = [s for s, d in zip(snippets, distances) if d <= self._threshold]
+        dropped = len(snippets) - len(kept)
+        if dropped:
+            log(self.repo_name, "RAG",
+                f"  Threshold {self._threshold}: dropped {dropped} low-similarity result(s)")
+        return kept
+
+    def _keyword_search(self, collection, question: str, already: set[str]) -> list[str]:
+        """Substring search for significant words from the query.
+
+        Catches coded identifiers (e.g. uniformity_refresh inside
+        KEMIxTExUR_uniformity_refresh_cnp) that semantic embeddings miss.
+        """
+        # Extract words >= 4 chars, split on whitespace and identifier delimiters
+        words = [w for w in re.split(r'[\s_\-./]+', question) if len(w) >= 4]
+        extras = []
+        seen = set(already)
+        for word in words:
+            try:
+                res = collection.get(
+                    where_document={"$contains": word},
+                    limit=self.top_k,
+                )
+                for doc in (res.get("documents") or []):
+                    if doc not in seen:
+                        extras.append(doc)
+                        seen.add(doc)
+            except Exception:
+                pass   # $contains not supported in this ChromaDB version — skip
+        return extras
+
     def query(self, question: str) -> str:
         if self._docs_collection is None:
             raise RuntimeError("Call build_or_load_index() before query()")
 
         q_emb = self._embed([question])
+        threshold_note = f", threshold={self._threshold}" if self._threshold else ""
 
-        log(self.repo_name, "RAG", f"Searching docs (top_k={self.top_k})...")
-        doc_results = self._docs_collection.query(query_embeddings=q_emb, n_results=self.top_k)
-        doc_snippets = doc_results["documents"][0] if doc_results["documents"] else []
-        doc_text = "\n---\n".join(doc_snippets) if doc_snippets else ""
-        log(self.repo_name, "RAG", f"Docs: {len(doc_snippets)} results, {len(doc_text)} chars")
+        # ── Docs: semantic search ─────────────────────────────────────────────
+        log(self.repo_name, "RAG", f"Searching docs (top_k={self.top_k}{threshold_note})...")
+        doc_res  = self._docs_collection.query(query_embeddings=q_emb, n_results=self.top_k,
+                                               include=["documents", "distances"])
+        doc_snip = doc_res["documents"][0] if doc_res["documents"] else []
+        doc_dist = doc_res["distances"][0] if doc_res.get("distances") else [0.0] * len(doc_snip)
+        doc_snip = self._apply_threshold(doc_snip, doc_dist)
+        doc_text = "\n---\n".join(doc_snip)
+        log(self.repo_name, "RAG", f"Docs: {len(doc_snip)} results, {len(doc_text)} chars")
 
+        # ── Code: semantic search + keyword augmentation ──────────────────────
         code_text = ""
         if self._code_collection is not None:
             log(self.repo_name, "RAG",
                 "[Demo] Code search: in production this would call an LLM for deep code understanding.")
             log(self.repo_name, "RAG",
-                "       Here we use RAG similarity search as a demo approximation.")
-            log(self.repo_name, "RAG", f"Searching source code (top_k={self.top_k})...")
-            code_results = self._code_collection.query(query_embeddings=q_emb, n_results=self.top_k)
-            code_snippets = code_results["documents"][0] if code_results["documents"] else []
-            code_text = "\n---\n".join(code_snippets) if code_snippets else ""
-            log(self.repo_name, "RAG", f"Code: {len(code_snippets)} results, {len(code_text)} chars")
+                f"Searching source code — semantic (top_k={self.top_k}{threshold_note}) + keyword...")
+            code_res  = self._code_collection.query(query_embeddings=q_emb, n_results=self.top_k,
+                                                    include=["documents", "distances"])
+            code_snip = code_res["documents"][0] if code_res["documents"] else []
+            code_dist = code_res["distances"][0] if code_res.get("distances") else [0.0] * len(code_snip)
+            code_snip = self._apply_threshold(code_snip, code_dist)
+
+            # Keyword augmentation — catches identifiers semantic search misses
+            kw_extras = self._keyword_search(self._code_collection, question, set(code_snip))
+            if kw_extras:
+                log(self.repo_name, "RAG",
+                    f"  Keyword search added {len(kw_extras)} extra chunk(s) not found semantically")
+            code_snip = code_snip + kw_extras
+            code_text = "\n---\n".join(code_snip)
+            log(self.repo_name, "RAG", f"Code: {len(code_snip)} results, {len(code_text)} chars")
         else:
             log(self.repo_name, "RAG", "No code collection — skipping source search")
 
