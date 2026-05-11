@@ -38,6 +38,13 @@ _FUNC_BOUNDARY = re.compile(
     r"|(?:(?:public|private|protected|internal|static|abstract"
     r"|final|override|virtual|async|inline|extern|unsafe)\s+){1,4}\w"  # Java/C++/C# with modifiers
     r"|(?:export\s+)?(?:async\s+)?function\s"                          # JS/TS function
+    # C/C++: primitive return type at column 0  e.g. "void foo(" "int bar("
+    r"|(?:void|int|long|short|double|float|char|bool|auto|unsigned|signed"
+    r"|size_t|uint8_t|uint16_t|uint32_t|uint64_t|int8_t|int16_t|int32_t|int64_t"
+    r"|BOOL|VOID|INT|UINT|DWORD|HANDLE)\s+\w"
+    # C/C++: custom return type at column 0  e.g. "KEMIResult KEMIxTExUR_uniformity_refresh("
+    # Matches: Word [*& ]+ Word ( — two identifiers then open paren
+    r"|[A-Za-z_]\w*[\s\*&]+[A-Za-z_]\w*\s*\("
     r")"
 )
 
