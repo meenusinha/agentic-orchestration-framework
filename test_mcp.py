@@ -34,6 +34,7 @@ except ImportError:
     sys.exit(1)
 
 import json
+import shutil
 import subprocess
 import threading
 import time
@@ -112,6 +113,19 @@ def _diagnose_server(script: Path) -> None:
         print(f"  SERVER STDERR:\n{proc.stderr.strip()}")
     if proc.stdout.strip():
         print(f"  SERVER STDOUT:\n{proc.stdout.strip()[:300]}")
+
+# ── Wipe ChromaDB so index always rebuilds fresh ─────────────────────────────
+print("Clearing ChromaDB caches...", flush=True)
+for repo in repos:
+    raw = repo["path"]
+    p = Path(raw) if Path(raw).is_absolute() else (CONFIG_PATH.parent / raw).resolve()
+    chroma = p / ".chroma_db"
+    if chroma.exists():
+        shutil.rmtree(chroma)
+        print(f"  [{repo['name']}] .chroma_db deleted", flush=True)
+    else:
+        print(f"  [{repo['name']}] no .chroma_db found — will build fresh", flush=True)
+print()
 
 # ── Pre-flight: check each MCP server starts cleanly ─────────────────────────
 print("\nPre-flight check — testing each MCP server startup...")
