@@ -37,3 +37,10 @@ top_k: 3
 # With normalised embeddings: ~0.5 is tight, ~1.0 is moderate, null = no filtering.
 # Keyword search always runs in addition and is unaffected by this threshold.
 similarity_threshold: null
+
+# Chunking strategy (applied when rebuilding ChromaDB — requires cache deletion to take effect)
+# Code is split at function/class boundaries; docs are split at paragraphs.
+# Chunks larger than max_chunk_chars are further split with overlap.
+# Industry standard: 500-1500 chars per chunk, 10% overlap.
+max_chunk_chars: 1500
+chunk_overlap_chars: 150

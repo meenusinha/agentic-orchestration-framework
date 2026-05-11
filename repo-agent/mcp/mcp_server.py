@@ -58,6 +58,8 @@ CHROMA_DB       = str(REPO_ROOT / ".chroma_db")
 EXTRA_EXT       = _cfg.get("extra_extensions", [])
 TOP_K                = _cfg.get("top_k", 3)
 SIMILARITY_THRESHOLD = _cfg.get("similarity_threshold", None)
+MAX_CHUNK_CHARS      = _cfg.get("max_chunk_chars", 1500)
+CHUNK_OVERLAP_CHARS  = _cfg.get("chunk_overlap_chars", 150)
 EMBEDDING_MODEL      = os.environ.get("EMBEDDING_MODEL_PATH", "all-MiniLM-L6-v2")
 
 # ── Build RAG index ───────────────────────────────────────────────────────────
@@ -70,6 +72,8 @@ rag = RepoRAG(
     extra_extensions=EXTRA_EXT,
     top_k=TOP_K,
     similarity_threshold=SIMILARITY_THRESHOLD,
+    max_chunk_chars=MAX_CHUNK_CHARS,
+    chunk_overlap_chars=CHUNK_OVERLAP_CHARS,
     embedding_model=EMBEDDING_MODEL,
 )
 rag.build_or_load_index()

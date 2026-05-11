@@ -26,6 +26,21 @@ _DEFAULT_EXTENSIONS = {
     ".thrift", ".proto", ".graphql",
 }
 
+# Regex that matches the START of a function/class/method definition.
+# Used to split source files at logical boundaries instead of blank lines.
+_FUNC_BOUNDARY = re.compile(
+    r"(?m)^(?="                                                         # zero-width, start of line
+    r"(?:async\s+)?def\s"                                               # Python def / async def
+    r"|class\s"                                                         # class (all languages)
+    r"|interface\s"                                                     # interface
+    r"|(?:pub(?:\s+unsafe)?\s+)?(?:async\s+)?fn\s"                     # Rust fn
+    r"|func\s"                                                          # Go func
+    r"|(?:(?:public|private|protected|internal|static|abstract"
+    r"|final|override|virtual|async|inline|extern|unsafe)\s+){1,4}\w"  # Java/C++/C# with modifiers
+    r"|(?:export\s+)?(?:async\s+)?function\s"                          # JS/TS function
+    r")"
+)
+
 
 class RepoRAG:
     def __init__(
@@ -37,13 +52,17 @@ class RepoRAG:
         chroma_persist_dir: str = ".chroma_db",
         top_k: int = 3,
         similarity_threshold: float = None,
+        max_chunk_chars: int = 1500,
+        chunk_overlap_chars: int = 150,
         extra_extensions: list[str] = None,
     ):
         self.repo_name = repo_name
         self.knowledge_paths = [Path(p) for p in knowledge_paths] if knowledge_paths else []
         self.src_paths = [Path(p) for p in src_paths] if src_paths else []
         self.top_k = top_k
-        self._threshold = similarity_threshold   # L2 distance ceiling; None = no filtering
+        self._threshold = similarity_threshold
+        self._max_chunk = max_chunk_chars
+        self._overlap   = chunk_overlap_chars
         self._extensions = _DEFAULT_EXTENSIONS | set(extra_extensions or [])
 
         log(repo_name, "INDEX", f"Initializing ChromaDB at {chroma_persist_dir}")
@@ -53,10 +72,61 @@ class RepoRAG:
         self._docs_collection = None
         self._code_collection = None
 
+    # ── Chunking helpers ──────────────────────────────────────────────────────
+
+    def _split_with_overlap(self, text: str) -> list[str]:
+        """Slide a window of max_chunk_chars with overlap over long text."""
+        chunks, step = [], max(1, self._max_chunk - self._overlap)
+        for start in range(0, len(text), step):
+            chunk = text[start:start + self._max_chunk].strip()
+            if len(chunk) >= 40:
+                chunks.append(chunk)
+        return chunks
+
+    def _chunk_docs(self, text: str) -> list[str]:
+        """Paragraph split for markdown; enforce max size with overlap."""
+        chunks = []
+        for para in text.split("\n\n"):
+            para = para.strip()
+            if len(para) < 40:
+                continue
+            if len(para) <= self._max_chunk:
+                chunks.append(para)
+            else:
+                chunks.extend(self._split_with_overlap(para))
+        return chunks
+
+    def _chunk_code(self, text: str) -> list[str]:
+        """Split source file at function/class boundaries; enforce max size with overlap.
+
+        Falls back to overlap-windowed splitting when no boundaries are detected
+        (e.g. C header files, plain config files).
+        """
+        boundaries = [m.start() for m in _FUNC_BOUNDARY.finditer(text)]
+        if not boundaries:
+            return self._split_with_overlap(text)
+
+        if boundaries[0] != 0:
+            boundaries = [0] + boundaries
+        boundaries.append(len(text))
+
+        chunks = []
+        for i in range(len(boundaries) - 1):
+            block = text[boundaries[i]:boundaries[i + 1]].strip()
+            if len(block) < 40:
+                continue
+            if len(block) <= self._max_chunk:
+                chunks.append(block)
+            else:
+                # Single function too large — slide a window over it with overlap
+                chunks.extend(self._split_with_overlap(block))
+        return chunks
+
+    # ── Embedding ─────────────────────────────────────────────────────────────
+
     def _embed(self, texts: list[str]) -> list[list[float]]:
-        """Embed texts in batches, logging progress via demo_logger (visible in live log stream)."""
-        _BATCH = 512
-        _LOG_EVERY = 2000   # log a line roughly every this many chunks
+        """Embed texts in batches, logging progress via demo_logger."""
+        _BATCH, _LOG_EVERY = 512, 2000
         results = []
         for start in range(0, len(texts), _BATCH):
             batch = texts[start:start + _BATCH]
@@ -65,11 +135,11 @@ class RepoRAG:
                                    show_progress_bar=False).tolist()
             )
             done = min(start + _BATCH, len(texts))
-            # log at each _LOG_EVERY boundary and at the very end
             if len(texts) > _BATCH and (done % _LOG_EVERY < _BATCH or done == len(texts)):
-                log(self.repo_name, "INDEX",
-                    f"  Embedding: {done}/{len(texts)} chunks done...")
+                log(self.repo_name, "INDEX", f"  Embedding: {done}/{len(texts)} chunks done...")
         return results
+
+    # ── ChromaDB helpers ──────────────────────────────────────────────────────
 
     def _collection_name(self, kind: str) -> str:
         return f"repo_{self.repo_name}_{kind}"
@@ -78,7 +148,7 @@ class RepoRAG:
         return name in [c.name for c in self._client.list_collections()]
 
     def _chroma_add(self, collection, docs: list[str], embeddings: list, ids: list[str]) -> None:
-        """Add documents to ChromaDB in batches — ChromaDB max is 5461 per call."""
+        """Add documents in batches — ChromaDB max per call is 5461."""
         _MAX = 5000
         for start in range(0, len(docs), _MAX):
             collection.add(
@@ -102,14 +172,13 @@ class RepoRAG:
         log(self.repo_name, "INDEX", f"Building docs index from {len(active)} path(s)")
         self._docs_collection = self._client.create_collection(name=name)
 
-        docs, ids = [], []
-        seen_ids: set[str] = set()
+        docs, ids, seen_ids = [], [], set()
         for knowledge_dir in active:
             for md_file in sorted(knowledge_dir.rglob("*.md")):
                 if md_file.name.lower() == "readme.md":
                     continue
-                text = md_file.read_text(encoding="utf-8", errors="ignore")
-                chunks = [p.strip() for p in text.split("\n\n") if len(p.strip()) > 40]
+                text   = md_file.read_text(encoding="utf-8", errors="ignore")
+                chunks = self._chunk_docs(text)
                 for i, chunk in enumerate(chunks):
                     uid = f"doc_{md_file.stem}_{i}_{len(docs)}"
                     if uid not in seen_ids:
@@ -126,12 +195,12 @@ class RepoRAG:
     # ── Code index ────────────────────────────────────────────────────────────
 
     def _read_file(self, src_file: Path) -> list[str]:
-        """Read and chunk one source file. Called in parallel — thread-safe (read-only)."""
+        """Read and chunk one source file at function boundaries. Thread-safe (read-only)."""
         try:
             text = src_file.read_text(encoding="utf-8", errors="ignore")
         except OSError:
             return []
-        return [c.strip() for c in text.split("\n\n") if len(c.strip()) > 40]
+        return self._chunk_code(text)
 
     def _index_code(self) -> None:
         active = [p for p in self.src_paths if p.exists()]
@@ -149,8 +218,10 @@ class RepoRAG:
             "Design note: ideally code search would be LLM-driven (deep semantic + context understanding).")
         log(self.repo_name, "ARCH",
             "Demo constraint: LLM call not available here — indexing code into RAG for similarity search instead.")
+        log(self.repo_name, "INDEX",
+            f"Chunking strategy: function/method boundaries, max {self._max_chunk} chars, "
+            f"{self._overlap} chars overlap")
 
-        # Collect every matching file across all src dirs first
         all_files = [
             f
             for src_dir in active
@@ -167,20 +238,15 @@ class RepoRAG:
         with ThreadPoolExecutor(max_workers=workers) as ex:
             for chunks in ex.map(self._read_file, all_files):
                 all_chunks.extend(chunks)
-        total_files = len(all_files)
 
-        log(self.repo_name, "INDEX",
-            f"Scanned {total_files} files → {len(all_chunks)} chunks.")
+        log(self.repo_name, "INDEX", f"Scanned {len(all_files)} files → {len(all_chunks)} chunks.")
 
         if not all_chunks:
             log(self.repo_name, "INDEX", "Code index ready: 0 chunks total")
             return
 
-        # Sequential IDs — uniqueness guaranteed because we own the list
         all_ids = [f"code_{i}" for i in range(len(all_chunks))]
-
-        log(self.repo_name, "INDEX",
-            f"Embedding {len(all_chunks)} chunks (batch_size=512)...")
+        log(self.repo_name, "INDEX", f"Embedding {len(all_chunks)} chunks (batch_size=512)...")
         self._code_collection = self._client.create_collection(name=name)
         self._chroma_add(self._code_collection, all_chunks, self._embed(all_chunks), all_ids)
         log(self.repo_name, "INDEX", f"Code index ready: {len(all_chunks)} chunks total")
@@ -194,10 +260,9 @@ class RepoRAG:
         log(self.repo_name, "INDEX", "RAG index ready")
 
     def _apply_threshold(self, snippets: list[str], distances: list[float]) -> list[str]:
-        """Drop results whose L2 distance exceeds the configured threshold."""
         if self._threshold is None:
             return snippets
-        kept = [s for s, d in zip(snippets, distances) if d <= self._threshold]
+        kept    = [s for s, d in zip(snippets, distances) if d <= self._threshold]
         dropped = len(snippets) - len(kept)
         if dropped:
             log(self.repo_name, "RAG",
@@ -205,61 +270,50 @@ class RepoRAG:
         return kept
 
     def _keyword_search(self, collection, question: str, already: set[str]) -> list[str]:
-        """Substring search for significant terms from the query.
+        """Substring search — catches coded identifiers semantic embeddings miss.
 
-        Builds two levels of search terms:
-        1. Whole tokens (whitespace-split, underscores kept) — e.g. "uniformity_refresh"
-           directly matches robust_uniformity_refresh, KEMIxTExUR_uniformity_refresh_cnp
-        2. Sub-parts (split on _ - .) for broader coverage
-        More specific terms are searched first so the limit catches the right chunks.
+        Searches compound tokens first (e.g. uniformity_refresh), then sub-parts.
         """
-        # Level 1: whole tokens — keep underscores (most specific)
-        tokens = [t for t in re.split(r'\s+', question) if len(t) >= 4]
-        # Level 2: sub-parts — split on identifier delimiters
-        parts  = [p for t in tokens for p in re.split(r'[_\-./]+', t) if len(p) >= 4]
-        # Most specific first, deduped, preserving order
+        tokens     = [t for t in re.split(r'\s+', question) if len(t) >= 4]
+        parts      = [p for t in tokens for p in re.split(r'[_\-./]+', t) if len(p) >= 4]
         seen_terms: list[str] = []
         for term in tokens + parts:
             if term not in seen_terms:
                 seen_terms.append(term)
 
-        extras = []
-        seen_docs = set(already)
-        kw_limit = min(self.top_k * 3, 30)   # wider limit so specific chunks aren't crowded out
+        extras, seen_docs = [], set(already)
+        kw_limit = min(self.top_k * 3, 30)
         for term in seen_terms:
             try:
-                res = collection.get(
-                    where_document={"$contains": term},
-                    limit=kw_limit,
-                )
+                res = collection.get(where_document={"$contains": term}, limit=kw_limit)
                 for doc in (res.get("documents") or []):
                     if doc not in seen_docs:
                         extras.append(doc)
                         seen_docs.add(doc)
             except Exception:
-                pass   # $contains not supported in this ChromaDB version — skip
+                pass
         return extras
 
     def query(self, question: str) -> str:
         if self._docs_collection is None:
             raise RuntimeError("Call build_or_load_index() before query()")
 
-        q_emb = self._embed([question])
+        q_emb          = self._embed([question])
         threshold_note = f", threshold={self._threshold}" if self._threshold else ""
 
-        # ── Docs: semantic search ─────────────────────────────────────────────
+        # ── Docs ─────────────────────────────────────────────────────────────
         log(self.repo_name, "RAG", f"Searching docs (top_k={self.top_k}{threshold_note})...")
         doc_res  = self._docs_collection.query(query_embeddings=q_emb, n_results=self.top_k,
                                                include=["documents", "distances"])
         doc_snip = doc_res["documents"][0] if doc_res["documents"] else []
         doc_dist = doc_res["distances"][0] if doc_res.get("distances") else [0.0] * len(doc_snip)
         doc_snip = self._apply_threshold(doc_snip, doc_dist)
-        for i, (snippet, dist) in enumerate(zip(doc_snip, doc_dist)):
-            log(self.repo_name, "RAG", f"  Doc[{i+1}] dist={dist:.3f}  {snippet[:80].replace(chr(10),' ')!r}")
+        for i, (s, d) in enumerate(zip(doc_snip, doc_dist)):
+            log(self.repo_name, "RAG", f"  Doc[{i+1}] dist={d:.3f}  {s[:80].replace(chr(10),' ')!r}")
         doc_text = "\n---\n".join(doc_snip)
         log(self.repo_name, "RAG", f"Docs: {len(doc_snip)} results, {len(doc_text)} chars")
 
-        # ── Code: semantic search + keyword augmentation ──────────────────────
+        # ── Code ─────────────────────────────────────────────────────────────
         code_text = ""
         if self._code_collection is not None:
             log(self.repo_name, "RAG",
@@ -271,16 +325,15 @@ class RepoRAG:
             code_snip = code_res["documents"][0] if code_res["documents"] else []
             code_dist = code_res["distances"][0] if code_res.get("distances") else [0.0] * len(code_snip)
             code_snip = self._apply_threshold(code_snip, code_dist)
-            for i, (snippet, dist) in enumerate(zip(code_snip, code_dist)):
-                log(self.repo_name, "RAG", f"  Code[{i+1}] dist={dist:.3f}  {snippet[:80].replace(chr(10),' ')!r}")
+            for i, (s, d) in enumerate(zip(code_snip, code_dist)):
+                log(self.repo_name, "RAG", f"  Code[{i+1}] dist={d:.3f}  {s[:80].replace(chr(10),' ')!r}")
 
-            # Keyword augmentation — catches identifiers semantic search misses
             kw_extras = self._keyword_search(self._code_collection, question, set(code_snip))
             if kw_extras:
                 log(self.repo_name, "RAG",
                     f"  Keyword search added {len(kw_extras)} extra chunk(s) not found semantically")
-                for i, snippet in enumerate(kw_extras):
-                    log(self.repo_name, "RAG", f"  KW[{i+1}] (keyword match)  {snippet[:80].replace(chr(10),' ')!r}")
+                for i, s in enumerate(kw_extras):
+                    log(self.repo_name, "RAG", f"  KW[{i+1}] (keyword)  {s[:80].replace(chr(10),' ')!r}")
             code_snip = code_snip + kw_extras
             code_text = "\n---\n".join(code_snip)
             log(self.repo_name, "RAG", f"Code: {len(code_snip)} results, {len(code_text)} chars")
