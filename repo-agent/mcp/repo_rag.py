@@ -50,10 +50,22 @@ class RepoRAG:
         self._code_collection = None
 
     def _embed(self, texts: list[str]) -> list[list[float]]:
-        """Embed a list of texts in one optimised batch."""
-        return self._model.encode(
-            texts, batch_size=256, normalize_embeddings=True, show_progress_bar=False
-        ).tolist()
+        """Embed texts in batches, logging progress via demo_logger (visible in live log stream)."""
+        _BATCH = 256
+        _LOG_EVERY = 2000   # log a line roughly every this many chunks
+        results = []
+        for start in range(0, len(texts), _BATCH):
+            batch = texts[start:start + _BATCH]
+            results.extend(
+                self._model.encode(batch, normalize_embeddings=True,
+                                   show_progress_bar=False).tolist()
+            )
+            done = min(start + _BATCH, len(texts))
+            # log at each _LOG_EVERY boundary and at the very end
+            if len(texts) > _BATCH and (done % _LOG_EVERY < _BATCH or done == len(texts)):
+                log(self.repo_name, "INDEX",
+                    f"  Embedding: {done}/{len(texts)} chunks done...")
+        return results
 
     def _collection_name(self, kind: str) -> str:
         return f"repo_{self.repo_name}_{kind}"
