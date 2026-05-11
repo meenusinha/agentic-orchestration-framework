@@ -59,6 +59,8 @@ LOG_FILE  = config.get("log_file", "/tmp/mcp-orchestration.log")
 HTML_FILE = html_log.path_from_log(LOG_FILE)
 os.environ["DEMO_LOG_FILE"] = LOG_FILE
 
+# Clear both log files at the start of every run
+Path(LOG_FILE).write_text("", encoding="utf-8")
 html_log.init(HTML_FILE)
 
 # ── Live log streaming ────────────────────────────────────────────────────────
