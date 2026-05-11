@@ -101,12 +101,12 @@ class OrchestratorRouter:
             f"Router ready — will query {len(self._repo_mcp_scripts)} repo MCP servers")
 
     def get_relevant_repos(
-        self, requesting_repo: str, feature_description: str, top_k: int = 2, timeout: int = 300
+        self, requesting_repo: str, feature_description: str, top_k: int = 2, timeout: int = 600
     ) -> tuple[list[str], dict[str, float]]:
         """
         Query each peer repo's RAG via MCP and rank by content relevance.
         Returns (selected_repo_names, all_scores).
-        timeout: seconds to wait per repo (default 300 — first run builds the index)
+        timeout: seconds to wait per repo (default 600 — first run builds the index)
         """
         log("orchestrator_router", "ROUTING", f"Routing: '{feature_description[:70]}...'")
         peer_count = sum(1 for n in self._repo_mcp_scripts if n != requesting_repo)

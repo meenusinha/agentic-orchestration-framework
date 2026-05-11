@@ -106,7 +106,7 @@ def _diagnose_server(script: Path) -> None:
     )
     proc = subprocess.run(
         [sys.executable, str(script)],
-        input=init_msg, capture_output=True, text=True, timeout=300,
+        input=init_msg, capture_output=True, text=True, timeout=600,
         env=os.environ,
     )
     if proc.stderr.strip():
@@ -114,17 +114,21 @@ def _diagnose_server(script: Path) -> None:
     if proc.stdout.strip():
         print(f"  SERVER STDOUT:\n{proc.stdout.strip()[:300]}")
 
-# ── Wipe ChromaDB so index always rebuilds fresh ─────────────────────────────
-print("Clearing ChromaDB caches...", flush=True)
+# ── Per-repo ChromaDB prompt ──────────────────────────────────────────────────
+print("ChromaDB cache check (keeping cache skips re-indexing)...", flush=True)
 for repo in repos:
     raw = repo["path"]
     p = Path(raw) if Path(raw).is_absolute() else (CONFIG_PATH.parent / raw).resolve()
     chroma = p / ".chroma_db"
     if chroma.exists():
-        shutil.rmtree(chroma)
-        print(f"  [{repo['name']}] .chroma_db deleted", flush=True)
+        answer = input(f"  [{repo['name']}] .chroma_db exists — delete and rebuild? [y/N] ").strip().lower()
+        if answer == "y":
+            shutil.rmtree(chroma)
+            print(f"  [{repo['name']}] deleted — will rebuild index", flush=True)
+        else:
+            print(f"  [{repo['name']}] kept — will use cached index (faster)", flush=True)
     else:
-        print(f"  [{repo['name']}] no .chroma_db found — will build fresh", flush=True)
+        print(f"  [{repo['name']}] no cache found — will build fresh", flush=True)
 print()
 
 # ── Pre-flight: check each MCP server starts cleanly ─────────────────────────
@@ -141,7 +145,7 @@ for repo in repos:
         _diagnose_server(script)
         print("ok")
     except subprocess.TimeoutExpired:
-        print("TIMEOUT — server did not respond within 300s")
+        print("TIMEOUT — server did not respond within 600s")
         any_failed = True
     except Exception as e:
         print(f"ERROR — {e}")
@@ -171,7 +175,7 @@ for repo in repos:
         print(f"[{name}] SKIP — mcp_server.py not found", flush=True)
         continue
     print(f"[{name}] Querying...", flush=True)
-    result = _mcp_call(str(script), "query_repo", {"feature_request": feature_request}, timeout=300)
+    result = _mcp_call(str(script), "query_repo", {"feature_request": feature_request}, timeout=600)
     repo_results[name] = result
 
 # ── Step 3: Build Feature Analysis Document ───────────────────────────────────
