@@ -72,6 +72,34 @@ def hline(slide, y):
     line.line.color.rgb = BORDER
     line.line.width = Emu(9525)
 
+def conn(slide, x1, y1, x2, y2, color=BLUE, lw=Emu(15876)):
+    """Draw a connector line and place a direction arrow character at the endpoint."""
+    from lxml import etree
+    c = slide.shapes.add_connector(1, Inches(x1), Inches(y1), Inches(x2), Inches(y2))
+    c.line.color.rgb = color
+    c.line.width = lw
+    # Arrowhead via XML on the connector's spPr/ln element
+    try:
+        from pptx.oxml.ns import qn
+        sp_pr = c._element.find(qn('p:spPr'))
+        ans   = 'http://schemas.openxmlformats.org/drawingml/2006/main'
+        ln    = sp_pr.find(f'{{{ans}}}ln')
+        if ln is None:
+            ln = etree.SubElement(sp_pr, f'{{{ans}}}ln')
+        tail = etree.SubElement(ln, f'{{{ans}}}tailEnd')
+        tail.set('type', 'arrow')
+        tail.set('w', 'med')
+        tail.set('len', 'med')
+    except Exception:
+        pass   # arrowhead failed gracefully — line still visible
+    return c
+
+def conn_label(slide, x1, y1, x2, y2, text, color=BLUE):
+    """Small label centred on a connector."""
+    mx, my = (x1 + x2) / 2, (y1 + y2) / 2
+    add_text(slide, text, Inches(mx - 0.9), Inches(my - 0.17),
+             Inches(1.8), Inches(0.32), size=8, color=color, align=PP_ALIGN.CENTER)
+
 # ── Slide builder functions ───────────────────────────────────────────────────
 
 def slide_title(prs):
@@ -463,6 +491,122 @@ def slide_demo(prs):
                       fill=RGBColor(0x0d,0x1f,0x12), line=GREEN, align=PP_ALIGN.CENTER)
 
 
+def slide_component_diagram(prs):
+    s = new_slide(prs)
+
+    # Header
+    add_text(s, "COMPONENT DIAGRAM", Inches(0.4), Inches(0.15), Inches(12.5), Inches(0.28),
+             size=10, bold=True, color=BLUE, align=PP_ALIGN.CENTER)
+    add_text(s, "MCP Tool Calling & RAG Knowledge Pipeline",
+             Inches(0.4), Inches(0.45), Inches(12.5), Inches(0.40),
+             size=22, bold=True, color=WHITE, align=PP_ALIGN.CENTER)
+
+    # ── Boxes ─────────────────────────────────────────────────────────────────
+
+    # GitHub Copilot
+    add_box(s, Inches(4.6), Inches(0.92), Inches(3.0), Inches(0.55),
+            fill=RGBColor(0x2d, 0x1f, 0x47), line=PURPLE)
+    add_text(s, "GitHub Copilot  (Agent Mode)",
+             Inches(4.63), Inches(0.96), Inches(2.94), Inches(0.46),
+             size=12, bold=True, color=PURPLE, align=PP_ALIGN.CENTER)
+
+    # Orchestrator
+    add_box(s, Inches(0.3), Inches(2.15), Inches(2.85), Inches(0.90),
+            fill=RGBColor(0x0d, 0x1f, 0x12), line=GREEN)
+    add_text(s, "Orchestrator\nrouter_mcp_server.py\n« get_relevant_repos »",
+             Inches(0.34), Inches(2.21), Inches(2.77), Inches(0.78),
+             size=10, color=GREEN, align=PP_ALIGN.CENTER)
+
+    # Repo Agents (stacked)
+    for i, name in enumerate(["scan_manager", "illumination", "expose_sequence"]):
+        ay = 1.5 + i * 1.0
+        add_box(s, Inches(3.85), Inches(ay), Inches(2.8), Inches(0.62),
+                fill=RGBColor(0x0d, 0x1f, 0x35), line=BLUE)
+        add_text(s, name,
+                 Inches(3.88), Inches(ay + 0.04), Inches(2.74), Inches(0.28),
+                 size=11, bold=True, color=BLUE, align=PP_ALIGN.CENTER)
+        add_text(s, "mcp_server.py  « query_repo »",
+                 Inches(3.88), Inches(ay + 0.34), Inches(2.74), Inches(0.22),
+                 size=9, color=BLUE, align=PP_ALIGN.CENTER)
+
+    # RAG Engine
+    add_box(s, Inches(7.3), Inches(2.1), Inches(2.6), Inches(1.05),
+            fill=RGBColor(0x2a, 0x16, 0x00), line=ORANGE)
+    add_text(s, "RAG Engine\nrepo_rag.py\nsemantic + keyword search",
+             Inches(7.34), Inches(2.17), Inches(2.52), Inches(0.91),
+             size=11, color=ORANGE, align=PP_ALIGN.CENTER)
+
+    # ChromaDB
+    add_box(s, Inches(7.3), Inches(4.0), Inches(2.6), Inches(0.70),
+            fill=RGBColor(0x0d, 0x1f, 0x12), line=GREEN)
+    add_text(s, "ChromaDB  •  .chroma_db/\nvector store  (L2 distance)",
+             Inches(7.34), Inches(4.06), Inches(2.52), Inches(0.58),
+             size=11, color=GREEN, align=PP_ALIGN.CENTER)
+
+    # Data sources
+    add_box(s, Inches(6.85), Inches(5.35), Inches(1.95), Inches(0.60),
+            fill=RGBColor(0x16, 0x1b, 0x22), line=GREY)
+    add_text(s, ".md Docs\nknowledge/",
+             Inches(6.87), Inches(5.40), Inches(1.91), Inches(0.50),
+             size=10, color=GREY, align=PP_ALIGN.CENTER)
+
+    add_box(s, Inches(9.05), Inches(5.35), Inches(1.95), Inches(0.60),
+            fill=RGBColor(0x16, 0x1b, 0x22), line=GREY)
+    add_text(s, "Source Code\n./src  (12 languages)",
+             Inches(9.07), Inches(5.40), Inches(1.91), Inches(0.50),
+             size=10, color=GREY, align=PP_ALIGN.CENTER)
+
+    # ── Connectors ────────────────────────────────────────────────────────────
+
+    # Copilot → Orchestrator
+    conn(s, 5.4, 1.47, 1.72, 2.15, color=PURPLE)
+    conn_label(s, 5.4, 1.47, 1.72, 2.15, "get_relevant_repos", color=PURPLE)
+
+    # Copilot → scan_manager (represents query_repo pattern for all 3)
+    conn(s, 6.75, 1.47, 5.25, 1.50, color=BLUE)
+    conn_label(s, 6.75, 1.47, 5.25, 1.50, "query_repo (×3)", color=BLUE)
+
+    # Orchestrator → Repo Agents (routing)
+    conn(s, 3.15, 2.52, 3.85, 1.81, color=GREEN)
+    conn(s, 3.15, 2.60, 3.85, 2.81, color=GREEN)
+    conn(s, 3.15, 2.68, 3.85, 3.81, color=GREEN)
+
+    # Repo Agents → RAG Engine
+    conn(s, 6.65, 1.81, 7.3, 2.38, color=BLUE)
+    conn(s, 6.65, 2.81, 7.3, 2.62, color=BLUE)
+    conn(s, 6.65, 3.81, 7.3, 2.87, color=BLUE)
+    conn_label(s, 6.65, 2.81, 7.3, 2.62, "query()", color=BLUE)
+
+    # RAG Engine → ChromaDB
+    conn(s, 8.6, 3.15, 8.6, 4.0, color=ORANGE)
+    conn_label(s, 8.6, 3.15, 8.6, 4.0, "vector search", color=ORANGE)
+
+    # ChromaDB → Data Sources
+    conn(s, 7.95, 4.70, 7.82, 5.35, color=GREY)
+    conn(s, 9.25, 4.70, 10.07, 5.35, color=GREY)
+    conn_label(s, 8.6, 4.70, 8.95, 5.35, "indexed", color=GREY)
+
+    # ── Footer note ───────────────────────────────────────────────────────────
+    add_text(s, "All MCP communication via stdio  —  JSON-RPC 2.0  —  no network ports, no cloud",
+             Inches(0.4), Inches(7.1), Inches(12.5), Inches(0.28),
+             size=9, color=GREY, align=PP_ALIGN.CENTER)
+
+    # ── Legend ────────────────────────────────────────────────────────────────
+    legend = [
+        (PURPLE, "AI Interface"),
+        (GREEN,  "Orchestrator / Storage"),
+        (BLUE,   "Repo Agent  (MCP server)"),
+        (ORANGE, "RAG Engine"),
+        (GREY,   "Data Source"),
+    ]
+    lx = Inches(0.4)
+    for col, lbl in legend:
+        add_box(s, lx, Inches(6.72), Inches(0.18), Inches(0.18), fill=col, line=col)
+        add_text(s, lbl, lx + Inches(0.22), Inches(6.71), Inches(2.1), Inches(0.22),
+                 size=9, color=GREY)
+        lx += Inches(2.55)
+
+
 # ── Build presentation ────────────────────────────────────────────────────────
 prs = Presentation()
 prs.slide_width  = W
@@ -476,6 +620,7 @@ slide_tech_stack(prs)
 slide_workflow(prs)
 slide_rag(prs)
 slide_mcp(prs)
+slide_component_diagram(prs)
 slide_setup(prs)
 slide_demo(prs)
 
