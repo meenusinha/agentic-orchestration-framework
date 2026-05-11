@@ -54,8 +54,9 @@ def _expand_paths(raw, default: str = None) -> list[Path]:
 
 SRC_DIRS       = _expand_paths(_cfg.get("src_path"))
 KNOWLEDGE_DIRS = _expand_paths(_cfg.get("knowledge_path"), default="./knowledge")
-CHROMA_DB      = str(REPO_ROOT / ".chroma_db")
+CHROMA_DB       = str(REPO_ROOT / ".chroma_db")
 EXTRA_EXT       = _cfg.get("extra_extensions", [])
+TOP_K           = _cfg.get("top_k", 3)
 EMBEDDING_MODEL = os.environ.get("EMBEDDING_MODEL_PATH", "all-MiniLM-L6-v2")
 
 # ── Build RAG index ───────────────────────────────────────────────────────────
@@ -66,6 +67,7 @@ rag = RepoRAG(
     src_paths=[str(d) for d in SRC_DIRS] if SRC_DIRS else None,
     chroma_persist_dir=CHROMA_DB,
     extra_extensions=EXTRA_EXT,
+    top_k=TOP_K,
     embedding_model=EMBEDDING_MODEL,
 )
 rag.build_or_load_index()
