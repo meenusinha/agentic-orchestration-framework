@@ -1,4 +1,5 @@
 """Generic RepoRAG — indexes knowledge/ docs and source code, no external dependencies."""
+import os
 import sys
 from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
@@ -51,7 +52,7 @@ class RepoRAG:
 
     def _embed(self, texts: list[str]) -> list[list[float]]:
         """Embed texts in batches, logging progress via demo_logger (visible in live log stream)."""
-        _BATCH = 256
+        _BATCH = 512
         _LOG_EVERY = 2000   # log a line roughly every this many chunks
         results = []
         for start in range(0, len(texts), _BATCH):
@@ -109,22 +110,13 @@ class RepoRAG:
 
     # ── Code index ────────────────────────────────────────────────────────────
 
-    def _scan_src_dir(self, src_dir: Path) -> tuple[list[str], int]:
-        """Read one source directory and return (chunks, file_count). Thread-safe."""
-        chunks, file_count = [], 0
-        for src_file in sorted(src_dir.rglob("*")):
-            if src_file.suffix not in self._extensions:
-                continue
-            try:
-                text = src_file.read_text(encoding="utf-8", errors="ignore")
-            except OSError:
-                continue
-            for chunk in text.split("\n\n"):
-                chunk = chunk.strip()
-                if len(chunk) > 40:
-                    chunks.append(chunk)
-            file_count += 1
-        return chunks, file_count
+    def _read_file(self, src_file: Path) -> list[str]:
+        """Read and chunk one source file. Called in parallel — thread-safe (read-only)."""
+        try:
+            text = src_file.read_text(encoding="utf-8", errors="ignore")
+        except OSError:
+            return []
+        return [c.strip() for c in text.split("\n\n") if len(c.strip()) > 40]
 
     def _index_code(self) -> None:
         active = [p for p in self.src_paths if p.exists()]
@@ -143,15 +135,24 @@ class RepoRAG:
         log(self.repo_name, "ARCH",
             "Demo constraint: LLM call not available here — indexing code into RAG for similarity search instead.")
 
+        # Collect every matching file across all src dirs first
+        all_files = [
+            f
+            for src_dir in active
+            for f in sorted(src_dir.rglob("*"))
+            if f.suffix in self._extensions
+        ]
+
+        workers = os.cpu_count() or 4
         log(self.repo_name, "INDEX",
-            f"Scanning {len(active)} source path(s) in parallel (workers={len(active)})...")
+            f"Scanning {len(all_files)} files across {len(active)} path(s) "
+            f"(workers={workers}, all CPU cores)...")
 
         all_chunks: list[str] = []
-        total_files = 0
-        with ThreadPoolExecutor(max_workers=len(active)) as ex:
-            for chunks, file_count in ex.map(self._scan_src_dir, active):
+        with ThreadPoolExecutor(max_workers=workers) as ex:
+            for chunks in ex.map(self._read_file, all_files):
                 all_chunks.extend(chunks)
-                total_files += file_count
+        total_files = len(all_files)
 
         log(self.repo_name, "INDEX",
             f"Scanned {total_files} files → {len(all_chunks)} chunks.")
@@ -164,7 +165,7 @@ class RepoRAG:
         all_ids = [f"code_{i}" for i in range(len(all_chunks))]
 
         log(self.repo_name, "INDEX",
-            f"Embedding {len(all_chunks)} chunks in one batch (batch_size=256)...")
+            f"Embedding {len(all_chunks)} chunks (batch_size=512)...")
         self._code_collection = self._client.create_collection(name=name)
         self._code_collection.add(
             documents=all_chunks,
