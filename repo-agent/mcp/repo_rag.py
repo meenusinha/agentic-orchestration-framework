@@ -74,6 +74,18 @@ class RepoRAG:
     def _collection_exists(self, name: str) -> bool:
         return name in [c.name for c in self._client.list_collections()]
 
+    def _chroma_add(self, collection, docs: list[str], embeddings: list, ids: list[str]) -> None:
+        """Add documents to ChromaDB in batches — ChromaDB max is 5461 per call."""
+        _MAX = 5000
+        for start in range(0, len(docs), _MAX):
+            collection.add(
+                documents=docs[start:start + _MAX],
+                embeddings=embeddings[start:start + _MAX],
+                ids=ids[start:start + _MAX],
+            )
+            log(self.repo_name, "INDEX",
+                f"  Stored {min(start + _MAX, len(docs))}/{len(docs)} chunks in ChromaDB...")
+
     # ── Docs index ────────────────────────────────────────────────────────────
 
     def _index_docs(self) -> None:
@@ -105,7 +117,7 @@ class RepoRAG:
 
         if docs:
             log(self.repo_name, "INDEX", f"Embedding {len(docs)} doc chunks...")
-            self._docs_collection.add(documents=docs, embeddings=self._embed(docs), ids=ids)
+            self._chroma_add(self._docs_collection, docs, self._embed(docs), ids)
         log(self.repo_name, "INDEX", f"Docs index ready: {len(docs)} chunks total")
 
     # ── Code index ────────────────────────────────────────────────────────────
@@ -167,11 +179,7 @@ class RepoRAG:
         log(self.repo_name, "INDEX",
             f"Embedding {len(all_chunks)} chunks (batch_size=512)...")
         self._code_collection = self._client.create_collection(name=name)
-        self._code_collection.add(
-            documents=all_chunks,
-            embeddings=self._embed(all_chunks),
-            ids=all_ids,
-        )
+        self._chroma_add(self._code_collection, all_chunks, self._embed(all_chunks), all_ids)
         log(self.repo_name, "INDEX", f"Code index ready: {len(all_chunks)} chunks total")
 
     # ── Public API ────────────────────────────────────────────────────────────
