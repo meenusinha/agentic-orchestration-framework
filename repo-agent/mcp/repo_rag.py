@@ -83,6 +83,7 @@ class RepoRAG:
                         seen_ids.add(uid)
                 log(self.repo_name, "INDEX", f"  {md_file.name}: {len(chunks)} chunks")
         if docs:
+            log(self.repo_name, "INDEX", f"Embedding {len(docs)} doc chunks...")
             self._docs_collection.add(documents=docs, ids=ids)
         log(self.repo_name, "INDEX", f"Docs index ready: {len(docs)} chunks total")
 
@@ -106,6 +107,7 @@ class RepoRAG:
             name=name, embedding_function=self._ef
         )
         docs, ids = [], []
+        file_count = 0
         for src_dir in active:
             for src_file in sorted(src_dir.rglob("*")):
                 if src_file.suffix not in self._extensions:
@@ -118,8 +120,21 @@ class RepoRAG:
                 for i, chunk in enumerate(chunks):
                     docs.append(chunk)
                     ids.append(f"code_{src_file.stem}_{i}_{len(docs)}")
-        if docs:
-            self._code_collection.add(documents=docs, ids=ids)
+                file_count += 1
+
+        if not docs:
+            log(self.repo_name, "INDEX", "Code index ready: 0 chunks total")
+            return
+
+        log(self.repo_name, "INDEX",
+            f"Scanned {file_count} files → {len(docs)} chunks. Embedding in batches...")
+        _BATCH = 100
+        for start in range(0, len(docs), _BATCH):
+            batch_docs = docs[start:start + _BATCH]
+            batch_ids  = ids[start:start + _BATCH]
+            self._code_collection.add(documents=batch_docs, ids=batch_ids)
+            log(self.repo_name, "INDEX",
+                f"  Embedded {min(start + _BATCH, len(docs))}/{len(docs)} chunks...")
         log(self.repo_name, "INDEX", f"Code index ready: {len(docs)} chunks total")
 
     def build_or_load_index(self) -> None:
