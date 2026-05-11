@@ -143,13 +143,12 @@ class RepoRAG:
         log(self.repo_name, "ARCH",
             "Demo constraint: LLM call not available here — indexing code into RAG for similarity search instead.")
 
-        workers = min(4, len(active))
         log(self.repo_name, "INDEX",
-            f"Scanning {len(active)} source path(s) in parallel (workers={workers})...")
+            f"Scanning {len(active)} source path(s) in parallel (workers={len(active)})...")
 
         all_chunks: list[str] = []
         total_files = 0
-        with ThreadPoolExecutor(max_workers=workers) as ex:
+        with ThreadPoolExecutor(max_workers=len(active)) as ex:
             for chunks, file_count in ex.map(self._scan_src_dir, active):
                 all_chunks.extend(chunks)
                 total_files += file_count
