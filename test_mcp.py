@@ -35,6 +35,8 @@ except ImportError:
 
 import json
 import subprocess
+import threading
+import time
 from router import _mcp_call, OrchestratorRouter
 
 CONFIG_PATH = Path(__file__).parent / "orchestrator" / "mcp" / "config.yaml"
@@ -52,7 +54,33 @@ if not repos:
     print("ERROR: No repos listed in orchestrator/mcp/config.yaml")
     sys.exit(1)
 
-os.environ["DEMO_LOG_FILE"] = config.get("log_file", "/tmp/mcp-orchestration.log")
+LOG_FILE = config.get("log_file", "/tmp/mcp-orchestration.log")
+os.environ["DEMO_LOG_FILE"] = LOG_FILE
+
+# ── Live log streaming ────────────────────────────────────────────────────────
+_stop_streaming = threading.Event()
+
+def _stream_logs():
+    """Tail the MCP log file and print new lines to stdout in real time."""
+    path = Path(LOG_FILE)
+    # Wait for log file to appear
+    for _ in range(20):
+        if path.exists():
+            break
+        time.sleep(0.5)
+    if not path.exists():
+        return
+    with open(path, "r") as f:
+        f.seek(0, 2)  # seek to end — only show new lines from this run
+        while not _stop_streaming.is_set():
+            line = f.readline()
+            if line:
+                print(f"  LOG | {line}", end="", flush=True)
+            else:
+                time.sleep(0.1)
+
+_log_thread = threading.Thread(target=_stream_logs, daemon=True)
+_log_thread.start()
 
 if len(sys.argv) < 2:
     print("Usage: python test_mcp.py \"your feature request here\"")
@@ -205,5 +233,7 @@ output_path.write_text(document, encoding="utf-8")
 print("\n" + "=" * 60)
 print(document)
 print("=" * 60)
+_stop_streaming.set()
+
 print(f"\nSaved to: {output_path}")
 print("Paste the contents of feature_analysis.md into Copilot chat.")

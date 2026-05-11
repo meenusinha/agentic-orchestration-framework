@@ -132,26 +132,22 @@ class RepoRAG:
         if self._docs_collection is None:
             raise RuntimeError("Call build_or_load_index() before query()")
 
+        # Always search both docs and code — return combined results
         log(self.repo_name, "RAG", f"Searching docs (top_k={self.top_k})...")
         doc_results = self._docs_collection.query(query_texts=[question], n_results=self.top_k)
         doc_snippets = doc_results["documents"][0] if doc_results["documents"] else []
         doc_text = "\n---\n".join(doc_snippets) if doc_snippets else ""
         log(self.repo_name, "RAG", f"Docs: {len(doc_snippets)} results, {len(doc_text)} chars")
 
-        if len(doc_text) >= _THIN_THRESHOLD:
-            log(self.repo_name, "RESULT", f"Docs sufficient — {len(doc_text)} chars")
-            return f"RELEVANT KNOWLEDGE:\n[From documentation]\n{doc_text}"
-
-        log(self.repo_name, "RAG", "Docs thin — searching source code...")
-        if self._code_collection is None:
-            result = doc_text if doc_text else "(no relevant knowledge found)"
-            log(self.repo_name, "RESULT", f"No code collection — {len(result)} chars")
-            return result
-
-        code_results = self._code_collection.query(query_texts=[question], n_results=self.top_k)
-        code_snippets = code_results["documents"][0] if code_results["documents"] else []
-        code_text = "\n---\n".join(code_snippets) if code_snippets else ""
-        log(self.repo_name, "RAG", f"Code: {len(code_snippets)} results, {len(code_text)} chars")
+        code_text = ""
+        if self._code_collection is not None:
+            log(self.repo_name, "RAG", f"Searching source code (top_k={self.top_k})...")
+            code_results = self._code_collection.query(query_texts=[question], n_results=self.top_k)
+            code_snippets = code_results["documents"][0] if code_results["documents"] else []
+            code_text = "\n---\n".join(code_snippets) if code_snippets else ""
+            log(self.repo_name, "RAG", f"Code: {len(code_snippets)} results, {len(code_text)} chars")
+        else:
+            log(self.repo_name, "RAG", "No code collection — skipping source search")
 
         if not doc_text and not code_text:
             log(self.repo_name, "RESULT", "No relevant knowledge found")
