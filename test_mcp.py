@@ -13,6 +13,11 @@ Paste feature_analysis.md content into Copilot chat for analysis.
 """
 import os
 import sys
+import json
+import shutil
+import subprocess
+import threading
+import time
 from datetime import date
 from pathlib import Path
 
@@ -20,8 +25,6 @@ FRAMEWORK_DIR = Path(__file__).parent.resolve()
 sys.path.insert(0, str(FRAMEWORK_DIR / "orchestrator" / "mcp"))
 
 # Remove system PYTHONPATH so subprocesses use only the venv's packages.
-# On some systems (e.g. RHEL with scientific software stacks) PYTHONPATH points
-# to system packages compiled for a different Python, causing import errors.
 os.environ.pop("PYTHONPATH", None)
 
 # Set env vars before any subprocess calls — inherited by all spawned MCP servers
@@ -33,18 +36,15 @@ except ImportError:
     print("ERROR: PyYAML not installed. Run: pip install pyyaml")
     sys.exit(1)
 
-import json
-import shutil
-import subprocess
-import threading
-import time
 from router import _mcp_call, OrchestratorRouter
+import term
+import html_log
 
-CONFIG_PATH = Path(__file__).parent / "orchestrator" / "mcp" / "config.yaml"
+# ── Config ────────────────────────────────────────────────────────────────────
+CONFIG_PATH = FRAMEWORK_DIR / "orchestrator" / "mcp" / "config.yaml"
 
 if not CONFIG_PATH.exists():
     print(f"ERROR: Config not found at {CONFIG_PATH}")
-    print("       Have you edited orchestrator/mcp/config.yaml?")
     sys.exit(1)
 
 with open(CONFIG_PATH) as f:
@@ -55,16 +55,18 @@ if not repos:
     print("ERROR: No repos listed in orchestrator/mcp/config.yaml")
     sys.exit(1)
 
-LOG_FILE = config.get("log_file", "/tmp/mcp-orchestration.log")
+LOG_FILE  = config.get("log_file", "/tmp/mcp-orchestration.log")
+HTML_FILE = html_log.path_from_log(LOG_FILE)
 os.environ["DEMO_LOG_FILE"] = LOG_FILE
+
+html_log.init(HTML_FILE)
 
 # ── Live log streaming ────────────────────────────────────────────────────────
 _stop_streaming = threading.Event()
 
 def _stream_logs():
-    """Tail the MCP log file and print new lines to stdout in real time."""
+    """Tail the plain-text log and print colour-coded lines to stdout."""
     path = Path(LOG_FILE)
-    # Wait for log file to appear
     for _ in range(20):
         if path.exists():
             break
@@ -72,32 +74,42 @@ def _stream_logs():
     if not path.exists():
         return
     with open(path, "r") as f:
-        f.seek(0, 2)  # seek to end — only show new lines from this run
+        f.seek(0, 2)
         while not _stop_streaming.is_set():
             line = f.readline()
             if line:
-                print(f"  LOG | {line}", end="", flush=True)
+                print(f"  {term.GRY}LOG{term._R} | {term.colorize_log(line.rstrip())}", flush=True)
             else:
                 time.sleep(0.1)
 
-_log_thread = threading.Thread(target=_stream_logs, daemon=True)
-_log_thread.start()
+threading.Thread(target=_stream_logs, daemon=True).start()
 
+# ── Banner ────────────────────────────────────────────────────────────────────
 if len(sys.argv) < 2:
     print("Usage: python test_mcp.py \"your feature request here\"")
     sys.exit(1)
 
 feature_request = " ".join(sys.argv[1:])
 
+print(term.c(f"\n{'─'*60}", term.GRY))
+print(term.c("  MCP Orchestration Demo", term.CYN))
+print(term.c(f"{'─'*60}", term.GRY))
+print(f"  Feature request : {term.c(feature_request, term.YEL)}")
+print(f"  HTML log        : {term.c('file://' + HTML_FILE, term.BLU)}  (open in browser)")
+print(term.c(f"{'─'*60}\n", term.GRY))
+
 # ── Helpers ───────────────────────────────────────────────────────────────────
-def _repo_script(repo: dict) -> Path | None:
+def _repo_path(repo: dict) -> Path:
     raw = repo["path"]
-    p = Path(raw) if Path(raw).is_absolute() else (CONFIG_PATH.parent / raw).resolve()
-    script = p / "mcp" / "mcp_server.py"
+    p = Path(raw)
+    return p if p.is_absolute() else (CONFIG_PATH.parent / p).resolve()
+
+def _repo_script(repo: dict) -> Path | None:
+    script = _repo_path(repo) / "mcp" / "mcp_server.py"
     return script if script.exists() else None
 
-def _diagnose_server(script: Path) -> None:
-    """Run the MCP server and print stderr so startup errors are visible."""
+def _preflight(script: Path) -> None:
+    """Start the server with just an initialize message and surface any stderr."""
     init_msg = (
         json.dumps({"jsonrpc": "2.0", "id": 1, "method": "initialize",
                     "params": {"protocolVersion": "2024-11-05", "capabilities": {},
@@ -106,152 +118,142 @@ def _diagnose_server(script: Path) -> None:
     )
     proc = subprocess.run(
         [sys.executable, str(script)],
-        input=init_msg, capture_output=True, text=True, timeout=600,
-        env=os.environ,
+        input=init_msg, capture_output=True, text=True, timeout=600, env=os.environ,
     )
     if proc.stderr.strip():
-        print(f"  SERVER STDERR:\n{proc.stderr.strip()}")
+        print(f"  {term.YEL}SERVER STDERR:{term._R}\n{proc.stderr.strip()}")
     if proc.stdout.strip():
         print(f"  SERVER STDOUT:\n{proc.stdout.strip()[:300]}")
 
-# ── Per-repo ChromaDB prompt ──────────────────────────────────────────────────
-print("ChromaDB cache check (keeping cache skips re-indexing)...", flush=True)
+# ── ChromaDB cache prompts ────────────────────────────────────────────────────
+print(term.c("ChromaDB cache", term.CYN) + " — keeping cache skips re-indexing:")
 for repo in repos:
-    raw = repo["path"]
-    p = Path(raw) if Path(raw).is_absolute() else (CONFIG_PATH.parent / raw).resolve()
-    chroma = p / ".chroma_db"
+    name   = repo["name"]
+    chroma = _repo_path(repo) / ".chroma_db"
+    tag    = term.c(f"[{name}]", term.BLU)
     if chroma.exists():
-        answer = input(f"  [{repo['name']}] .chroma_db exists — delete and rebuild? [y/N] ").strip().lower()
-        if answer == "y":
+        ans = input(f"  {tag} .chroma_db exists — delete and rebuild? {term.YEL}[y/N]{term._R} ").strip().lower()
+        if ans == "y":
             shutil.rmtree(chroma)
-            print(f"  [{repo['name']}] deleted — will rebuild index", flush=True)
+            print(f"  {tag} {term.c('deleted', term.RED)} — will rebuild index")
         else:
-            print(f"  [{repo['name']}] kept — will use cached index (faster)", flush=True)
+            print(f"  {tag} {term.c('kept', term.GRN)} — will use cached index")
     else:
-        print(f"  [{repo['name']}] no cache found — will build fresh", flush=True)
+        print(f"  {tag} no cache — will build fresh")
 print()
 
-# ── Pre-flight: check each MCP server starts cleanly ─────────────────────────
-print("\nPre-flight check — testing each MCP server startup...")
+# ── Pre-flight checks ─────────────────────────────────────────────────────────
+print(term.c("Pre-flight", term.CYN) + " — checking each MCP server starts cleanly...")
 any_failed = False
 for repo in repos:
-    name = repo["name"]
+    name   = repo["name"]
     script = _repo_script(repo)
+    tag    = term.c(f"[{name}]", term.BLU)
     if not script:
-        print(f"  [{name}] SKIP — mcp_server.py not found at expected path")
+        print(f"  {tag} {term.c('SKIP', term.YEL)} — mcp_server.py not found")
         continue
-    print(f"  [{name}] starting server...", end=" ", flush=True)
+    print(f"  {tag} starting server...", end=" ", flush=True)
     try:
-        _diagnose_server(script)
-        print("ok")
+        _preflight(script)
+        print(term.c("ok", term.GRN))
     except subprocess.TimeoutExpired:
-        print("TIMEOUT — server did not respond within 600s")
+        print(term.c("TIMEOUT (600s)", term.RED))
         any_failed = True
     except Exception as e:
-        print(f"ERROR — {e}")
+        print(term.c(f"ERROR — {e}", term.RED))
         any_failed = True
 
 if any_failed:
-    print("\nFix the server errors above before continuing.")
+    print(term.c("\nFix the server errors above before continuing.", term.RED))
     sys.exit(1)
 print()
 
-# ── Step 1: Run orchestrator routing ─────────────────────────────────────────
-print(f"\nQuerying orchestrator router...", flush=True)
+# ── Step 1: Orchestrator routing ──────────────────────────────────────────────
+print(term.c("Step 1", term.CYN) + " — Orchestrator routing...")
 router = OrchestratorRouter(CONFIG_PATH)
 requesting_repo = repos[0]["name"]
 targets, scores = router.get_relevant_repos(requesting_repo, feature_request)
-
 repo_display = {r["name"]: r.get("display_name", r["name"]) for r in repos}
-
-print(f"Selected repos: {targets}\n")
+print(f"  Selected: {term.c(str(targets), term.GRN)}\n")
 
 # ── Step 2: Query every repo ──────────────────────────────────────────────────
+print(term.c("Step 2", term.CYN) + " — Querying all repos...")
 repo_results: dict[str, str] = {}
 for repo in repos:
-    name = repo["name"]
+    name   = repo["name"]
     script = _repo_script(repo)
+    tag    = term.c(f"[{name}]", term.BLU)
     if not script:
-        print(f"[{name}] SKIP — mcp_server.py not found", flush=True)
+        print(f"  {tag} {term.c('SKIP', term.YEL)} — mcp_server.py not found")
         continue
-    print(f"[{name}] Querying...", flush=True)
+    print(f"  {tag} querying...", flush=True)
     result = _mcp_call(str(script), "query_repo", {"feature_request": feature_request}, timeout=600)
     repo_results[name] = result
+    preview = result[:80].replace("\n", " ")
+    print(f"  {tag} {term.c('done', term.GRN)} — {term.c(preview + '...', term.GRY)}")
 
 # ── Step 3: Build Feature Analysis Document ───────────────────────────────────
+print()
+print(term.c("Step 3", term.CYN) + " — Building Feature Analysis Document...")
+
 requesting_display = repo_display.get(requesting_repo, requesting_repo)
 today = date.today().isoformat()
 
-lines = [
-    f"# Feature Analysis: {feature_request}",
-    f"",
+doc_lines = [
+    f"# Feature Analysis: {feature_request}", "",
     f"**Requesting Repo**: {requesting_display}",
-    f"**Date**: {today}",
-    f"",
-    f"---",
-    f"",
-    f"## Routing",
-    f"",
-    f"The orchestrator ranked repos by how much relevant knowledge was found:",
-    f"",
+    f"**Date**: {today}", "", "---", "", "## Routing", "",
+    "The orchestrator ranked repos by how much relevant knowledge was found:", "",
 ]
 for name, score in sorted(scores.items(), key=lambda x: x[1], reverse=True):
     marker = "★ selected" if name in targets else "· not selected"
-    lines.append(f"- **{repo_display.get(name, name)}** — relevance score: {score:.3f} ({marker})")
+    doc_lines.append(f"- **{repo_display.get(name, name)}** — relevance score: {score:.3f} ({marker})")
 
-lines += [
-    f"",
-    f"---",
-    f"",
-    f"## Current State",
-    f"",
-]
+doc_lines += ["", "---", "", "## Current State", ""]
 
 for repo in repos:
-    name = repo["name"]
+    name    = repo["name"]
     display = repo_display.get(name, name)
-    suffix = " (Requesting Repo)" if name == requesting_repo else ""
-    lines.append(f"### {display}{suffix}")
-    lines.append(f"")
+    suffix  = " (Requesting Repo)" if name == requesting_repo else ""
+    doc_lines.append(f"### {display}{suffix}")
+    doc_lines.append("")
     if name in repo_results:
         result = repo_results[name]
         if "no relevant knowledge found" in result.lower():
-            lines.append("_No relevant knowledge found in this repo._")
+            doc_lines.append("_No relevant knowledge found in this repo._")
         else:
-            # Strip the RELEVANT KNOWLEDGE: prefix if present
             content = result
             if content.upper().startswith("RELEVANT KNOWLEDGE:"):
                 content = content[len("RELEVANT KNOWLEDGE:"):].strip()
-            lines.append(content)
+            doc_lines.append(content)
     else:
-        lines.append("_Could not query this repo (mcp_server.py not found)._")
-    lines.append(f"")
+        doc_lines.append("_Could not query this repo (mcp_server.py not found)._")
+    doc_lines.append("")
 
-lines += [
-    f"---",
-    f"",
-    f"## Instructions for Copilot",
-    f"",
-    f"The section above contains retrieved knowledge from all configured repos.",
-    f"Based **only** on this retrieved knowledge (not your own training data),",
-    f"please produce a Solution Design covering:",
-    f"",
-    f"- Which components in which repos need to change",
-    f"- What new interfaces or APIs are needed",
-    f"- How the repos will coordinate",
-    f"- Risks or dependencies to consider",
+doc_lines += [
+    "---", "", "## Instructions for Copilot", "",
+    "The section above contains retrieved knowledge from all configured repos.",
+    "Based **only** on this retrieved knowledge (not your own training data),",
+    "please produce a Solution Design covering:", "",
+    "- Which components in which repos need to change",
+    "- What new interfaces or APIs are needed",
+    "- How the repos will coordinate",
+    "- Risks or dependencies to consider",
 ]
 
-document = "\n".join(lines)
+document = "\n".join(doc_lines)
 
 # ── Output ────────────────────────────────────────────────────────────────────
-output_path = Path(__file__).parent / "feature_analysis.md"
+output_path = FRAMEWORK_DIR / "feature_analysis.md"
 output_path.write_text(document, encoding="utf-8")
 
-print("\n" + "=" * 60)
-print(document)
-print("=" * 60)
 _stop_streaming.set()
+time.sleep(0.3)   # let streaming thread flush last lines
+html_log.close(HTML_FILE)
 
-print(f"\nSaved to: {output_path}")
-print("Paste the contents of feature_analysis.md into Copilot chat.")
+print(term.c(f"\n{'═'*60}", term.GRY))
+print(document)
+print(term.c(f"{'═'*60}", term.GRY))
+print(f"\n{term.c('Saved:', term.GRN)} {output_path}")
+print(f"{term.c('HTML log:', term.GRN)} file://{HTML_FILE}")
+print(f"\nPaste {term.c('feature_analysis.md', term.YEL)} into Copilot chat.")
