@@ -509,34 +509,36 @@ def slide_component_diagram(prs):
              size=19, bold=True, color=WHITE, align=PP_ALIGN.CENTER)
 
     # ── Box geometry constants ─────────────────────────────────────────────────
-    COP_X, COP_Y, COP_W, COP_H     = 4.3,  0.83, 3.6,  0.62   # Copilot
-    ORC_X, ORC_Y, ORC_W, ORC_H     = 0.2,  2.15, 2.9,  0.90   # Orchestrator
-    AGT_X, AGT_W, AGT_H            = 3.5,  2.8,  0.65   # Repo Agents (stacked)
-    RAG_X, RAG_Y, RAG_W, RAG_H     = 7.1,  2.0,  2.7,  1.10   # RAG Engine
-    EMB_X, EMB_Y, EMB_W, EMB_H     = 10.3, 2.1,  2.8,  1.00   # Embedding Model
-    CHR_X, CHR_Y, CHR_W, CHR_H     = 7.1,  4.05, 2.7,  0.72   # ChromaDB
-    DOC_X, DOC_Y, DOC_W, DOC_H     = 6.65, 5.15, 1.9,  0.62   # .md Docs
-    SRC_X, SRC_Y, SRC_W, SRC_H     = 8.85, 5.15, 1.9,  0.62   # Source Code
-    LLM_X, LLM_Y, LLM_W, LLM_H     = 10.3, 3.95, 2.8,  1.60   # LLM not-used
+    # Right column (x=7.1): RAG → Embedding → ChromaDB stacked vertically.
+    # Every vector entering or leaving ChromaDB must pass through the Embedding Model.
+    COP_X, COP_Y, COP_W, COP_H  = 4.3,  0.83, 3.6,  0.62   # Copilot
+    ORC_X, ORC_Y, ORC_W, ORC_H  = 0.2,  2.15, 2.9,  0.90   # Orchestrator
+    AGT_X, AGT_W, AGT_H         = 3.5,  2.8,  0.65           # Repo Agents
+    RAG_X, RAG_Y, RAG_W, RAG_H  = 7.1,  1.75, 2.7,  0.85   # RAG Engine
+    EMB_X, EMB_Y, EMB_W, EMB_H  = 7.1,  2.80, 2.7,  0.78   # Embedding (between RAG & ChromaDB)
+    CHR_X, CHR_Y, CHR_W, CHR_H  = 7.1,  3.80, 2.7,  0.72   # ChromaDB
+    DOC_X, DOC_Y, DOC_W, DOC_H  = 6.65, 5.05, 1.9,  0.62   # .md Docs
+    SRC_X, SRC_Y, SRC_W, SRC_H  = 8.85, 5.05, 1.9,  0.62   # Source Code
+    LLM_X, LLM_Y, LLM_W, LLM_H  = 10.3, 1.75, 2.8,  2.05   # LLM not-used
 
-    # Derived midpoints / edges used for connectors
-    COP_BOT = COP_Y + COP_H                        # 1.45
-    COP_CX  = COP_X + COP_W / 2                    # 6.1
-    ORC_CX  = ORC_X + ORC_W / 2                    # 1.65
-    ORC_CY  = ORC_Y + ORC_H / 2                    # 2.60
-    ORC_R   = ORC_X + ORC_W                        # 3.10
-    RAG_CY  = RAG_Y + RAG_H / 2                    # 2.55
-    RAG_R   = RAG_X + RAG_W                        # 9.80
-    RAG_BOT = RAG_Y + RAG_H                        # 3.10
-    EMB_CY  = EMB_Y + EMB_H / 2                    # 2.60
-    CHR_CX  = CHR_X + CHR_W / 2                    # 8.45
-    CHR_BOT = CHR_Y + CHR_H                        # 4.77
-    DOC_CX  = DOC_X + DOC_W / 2                    # 7.60
-    SRC_CX  = SRC_X + SRC_W / 2                    # 9.80
+    # Derived
+    COP_BOT = COP_Y + COP_H                  # 1.45
+    COP_CX  = COP_X + COP_W / 2             # 6.10
+    ORC_CX  = ORC_X + ORC_W / 2             # 1.65
+    ORC_CY  = ORC_Y + ORC_H / 2             # 2.60
+    ORC_R   = ORC_X + ORC_W                 # 3.10
+    RAG_CX  = RAG_X + RAG_W / 2             # 8.45
+    RAG_CY  = RAG_Y + RAG_H / 2             # 2.175
+    RAG_BOT = RAG_Y + RAG_H                 # 2.60
+    EMB_BOT = EMB_Y + EMB_H                 # 3.58
+    CHR_CX  = CHR_X + CHR_W / 2             # 8.45
+    CHR_BOT = CHR_Y + CHR_H                 # 4.52
+    DOC_CX  = DOC_X + DOC_W / 2             # 7.60
+    SRC_CX  = SRC_X + SRC_W / 2             # 9.80
 
-    agent_y  = [1.52 + i * 1.03 for i in range(3)]          # top y of each agent
-    agent_cy = [y + AGT_H / 2   for y in agent_y]           # centre y
-    AGT_R    = AGT_X + AGT_W                                 # 6.30
+    agent_y  = [1.52 + i * 1.03 for i in range(3)]
+    agent_cy = [y + AGT_H / 2   for y in agent_y]
+    AGT_R    = AGT_X + AGT_W                 # 6.30
 
     # ── Component boxes ────────────────────────────────────────────────────────
 
@@ -566,18 +568,18 @@ def slide_component_diagram(prs):
                  Inches(AGT_X+0.05), Inches(ay+0.37), Inches(AGT_W-0.10), Inches(0.20),
                  size=8, color=BLUE, align=PP_ALIGN.CENTER)
 
-    # RAG Engine
+    # RAG Engine  (top of right column)
     add_box(s, Inches(RAG_X), Inches(RAG_Y), Inches(RAG_W), Inches(RAG_H),
             fill=RGBColor(0x2a,0x16,0x00), line=ORANGE)
     add_text(s, "RAG Engine\nrepo_rag.py\nhybrid: semantic + keyword",
-             Inches(RAG_X+0.05), Inches(RAG_Y+0.10), Inches(RAG_W-0.10), Inches(RAG_H-0.20),
+             Inches(RAG_X+0.05), Inches(RAG_Y+0.08), Inches(RAG_W-0.10), Inches(RAG_H-0.16),
              size=11, color=ORANGE, align=PP_ALIGN.CENTER)
 
-    # Embedding Model
+    # Embedding Model  (between RAG and ChromaDB — all vectors pass through here)
     add_box(s, Inches(EMB_X), Inches(EMB_Y), Inches(EMB_W), Inches(EMB_H),
             fill=RGBColor(0x10,0x18,0x25), line=BLUE)
     add_text(s, "Embedding Model\nall-MiniLM-L6-v2\nlocal  ·  offline  ·  ~90 MB",
-             Inches(EMB_X+0.05), Inches(EMB_Y+0.10), Inches(EMB_W-0.10), Inches(EMB_H-0.20),
+             Inches(EMB_X+0.05), Inches(EMB_Y+0.08), Inches(EMB_W-0.10), Inches(EMB_H-0.16),
              size=10, color=WHITE, align=PP_ALIGN.CENTER)
 
     # ChromaDB
@@ -622,12 +624,11 @@ def slide_component_diagram(prs):
     conn(s, COP_CX-0.8, COP_BOT, ORC_CX, ORC_Y, color=PURPLE, ctype=2)
     seq_badge(s, 1, (COP_CX-0.8+ORC_CX)/2, (COP_BOT+ORC_Y)/2, color=PURPLE)
 
-    # ② Copilot → Repo Agents  :  query_repo(feature_request)  →  RELEVANT KNOWLEDGE
-    #    Arrow drawn once to scan_manager; represents all 3 calls (labelled ×3)
-    conn(s, COP_CX+0.6, COP_BOT, AGT_X+AGT_W/2, agent_y[0], color=BLUE, ctype=2)
-    seq_badge(s, 2, (COP_CX+0.6+AGT_X+AGT_W/2)/2, (COP_BOT+agent_y[0])/2, color=BLUE)
-    add_text(s, "×3", Inches((COP_CX+0.6+AGT_X+AGT_W/2)/2 + 0.12),
-             Inches((COP_BOT+agent_y[0])/2 - 0.10), Inches(0.35), Inches(0.22),
+    # ② Copilot → Repo Agents (×3)  :  query_repo(feature_request)  →  RELEVANT KNOWLEDGE
+    conn(s, COP_CX+0.5, COP_BOT, AGT_X+AGT_W/2, agent_cy[1], color=BLUE, ctype=2)
+    seq_badge(s, 2, (COP_CX+0.5+AGT_X+AGT_W/2)/2, (COP_BOT+agent_cy[1])/2, color=BLUE)
+    add_text(s, "×3", Inches((COP_CX+0.5+AGT_X+AGT_W/2)/2 + 0.14),
+             Inches((COP_BOT+agent_cy[1])/2 - 0.12), Inches(0.35), Inches(0.22),
              size=8, bold=True, color=BLUE)
 
     # ③ Orchestrator → each Repo Agent  :  query_repo(q)  →  content length score
@@ -640,30 +641,33 @@ def slide_component_diagram(prs):
         conn(s, AGT_R, cy, RAG_X, RAG_CY, color=BLUE, ctype=2)
     seq_badge(s, 4, (AGT_R+RAG_X)/2, (agent_cy[1]+RAG_CY)/2, color=BLUE)
 
-    # ⑤ RAG Engine ↔ Embedding Model  :  encode(text)  ↔  384-dim float[]
-    conn(s, RAG_R, RAG_CY, EMB_X, EMB_CY, color=WHITE, ctype=2)
-    seq_badge(s, 5, (RAG_R+EMB_X)/2, (RAG_CY+EMB_CY)/2, color=WHITE)
+    # ⑤ RAG → Embedding Model  :  text chunks (indexing) / query text (search)  →  384-dim vector
+    #    Both indexing and querying pass through Embedding before touching ChromaDB
+    conn(s, RAG_CX, RAG_BOT, RAG_CX, EMB_Y, color=ORANGE, ctype=2)
+    seq_badge(s, 5, RAG_CX, (RAG_BOT+EMB_Y)/2, color=ORANGE)
 
-    # ⑥ RAG Engine → ChromaDB  :  vector similarity query  →  top-k chunks + L2 dist
-    conn(s, CHR_CX, RAG_BOT, CHR_CX, CHR_Y, color=ORANGE, ctype=2)
-    seq_badge(s, 6, CHR_CX, (RAG_BOT+CHR_Y)/2, color=ORANGE)
+    # ⑥ Embedding Model → ChromaDB  :  store vectors (index) / query vector (search)
+    #    Returns: top-k text chunks + L2 distances
+    conn(s, CHR_CX, EMB_BOT, CHR_CX, CHR_Y, color=BLUE, ctype=2)
+    seq_badge(s, 6, CHR_CX, (EMB_BOT+CHR_Y)/2, color=BLUE)
 
-    # ⑦ Docs + Source → ChromaDB  :  indexed at startup  →  embeddings stored
-    conn(s, DOC_CX, DOC_Y, CHR_CX-0.45, CHR_BOT, color=GREY, ctype=2)
-    conn(s, SRC_CX, SRC_Y, CHR_CX+0.45, CHR_BOT, color=GREY, ctype=2)
-    seq_badge(s, 7, (DOC_CX+CHR_CX-0.45)/2, (DOC_Y+CHR_BOT)/2, color=GREY)
+    # ⑦ Docs + Source → Embedding  :  text chunks fed into pipeline at startup
+    #    Path: RAG reads files → chunks → send to Embedding → vectors → ChromaDB
+    conn(s, DOC_CX,  DOC_Y, RAG_CX-0.4, EMB_BOT, color=GREY, ctype=2)
+    conn(s, SRC_CX,  SRC_Y, RAG_CX+0.4, EMB_BOT, color=GREY, ctype=2)
+    seq_badge(s, 7, (DOC_CX+RAG_CX-0.4)/2, (DOC_Y+EMB_BOT)/2, color=GREY)
 
     # ── Sequence legend (2-column footer) ─────────────────────────────────────
     leg_left = [
         (1, PURPLE, "get_relevant_repos(query_text)  →  [repo1, repo2]  (MCP/stdio, JSON-RPC 2.0)"),
         (2, BLUE,   "query_repo(feature_request)  →  RELEVANT KNOWLEDGE:...  (MCP/stdio, ×3 calls)"),
         (3, GREEN,  "route  →  query_repo on all repos  →  min(len/800, 1.0) score, return top-2"),
-        (4, BLUE,   "query(feature_request)  →  chunks + L2 distances  (internal, per-agent)"),
+        (4, BLUE,   "query(feature_request)  →  chunks + L2 distances  (internal RAG call)"),
     ]
     leg_right = [
-        (5, WHITE,  "encode(text)  →  384-dim float[]  (sentence-transformers, local CPU/GPU)"),
-        (6, ORANGE, "vector similarity search  →  top-k chunks + L2 dist  (ChromaDB)"),
-        (7, GREY,   "indexed at startup  →  text split → embed → stored in .chroma_db/"),
+        (5, ORANGE, "text chunks / query text  →  384-dim float[]  (RAG → Embedding Model)"),
+        (6, BLUE,   "vectors → store (index) / search (query)  →  top-k chunks + L2 dist  (ChromaDB)"),
+        (7, GREY,   "startup indexing: docs+src → chunk → Embedding → vectors → ChromaDB"),
     ]
     row_h = Inches(0.185)
     for i, (n, col, text) in enumerate(leg_left):
