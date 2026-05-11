@@ -205,25 +205,37 @@ class RepoRAG:
         return kept
 
     def _keyword_search(self, collection, question: str, already: set[str]) -> list[str]:
-        """Substring search for significant words from the query.
+        """Substring search for significant terms from the query.
 
-        Catches coded identifiers (e.g. uniformity_refresh inside
-        KEMIxTExUR_uniformity_refresh_cnp) that semantic embeddings miss.
+        Builds two levels of search terms:
+        1. Whole tokens (whitespace-split, underscores kept) — e.g. "uniformity_refresh"
+           directly matches robust_uniformity_refresh, KEMIxTExUR_uniformity_refresh_cnp
+        2. Sub-parts (split on _ - .) for broader coverage
+        More specific terms are searched first so the limit catches the right chunks.
         """
-        # Extract words >= 4 chars, split on whitespace and identifier delimiters
-        words = [w for w in re.split(r'[\s_\-./]+', question) if len(w) >= 4]
+        # Level 1: whole tokens — keep underscores (most specific)
+        tokens = [t for t in re.split(r'\s+', question) if len(t) >= 4]
+        # Level 2: sub-parts — split on identifier delimiters
+        parts  = [p for t in tokens for p in re.split(r'[_\-./]+', t) if len(p) >= 4]
+        # Most specific first, deduped, preserving order
+        seen_terms: list[str] = []
+        for term in tokens + parts:
+            if term not in seen_terms:
+                seen_terms.append(term)
+
         extras = []
-        seen = set(already)
-        for word in words:
+        seen_docs = set(already)
+        kw_limit = min(self.top_k * 3, 30)   # wider limit so specific chunks aren't crowded out
+        for term in seen_terms:
             try:
                 res = collection.get(
-                    where_document={"$contains": word},
-                    limit=self.top_k,
+                    where_document={"$contains": term},
+                    limit=kw_limit,
                 )
                 for doc in (res.get("documents") or []):
-                    if doc not in seen:
+                    if doc not in seen_docs:
                         extras.append(doc)
-                        seen.add(doc)
+                        seen_docs.add(doc)
             except Exception:
                 pass   # $contains not supported in this ChromaDB version — skip
         return extras
