@@ -254,6 +254,8 @@ class RepoRAG:
         doc_snip = doc_res["documents"][0] if doc_res["documents"] else []
         doc_dist = doc_res["distances"][0] if doc_res.get("distances") else [0.0] * len(doc_snip)
         doc_snip = self._apply_threshold(doc_snip, doc_dist)
+        for i, (snippet, dist) in enumerate(zip(doc_snip, doc_dist)):
+            log(self.repo_name, "RAG", f"  Doc[{i+1}] dist={dist:.3f}  {snippet[:80].replace(chr(10),' ')!r}")
         doc_text = "\n---\n".join(doc_snip)
         log(self.repo_name, "RAG", f"Docs: {len(doc_snip)} results, {len(doc_text)} chars")
 
@@ -269,12 +271,16 @@ class RepoRAG:
             code_snip = code_res["documents"][0] if code_res["documents"] else []
             code_dist = code_res["distances"][0] if code_res.get("distances") else [0.0] * len(code_snip)
             code_snip = self._apply_threshold(code_snip, code_dist)
+            for i, (snippet, dist) in enumerate(zip(code_snip, code_dist)):
+                log(self.repo_name, "RAG", f"  Code[{i+1}] dist={dist:.3f}  {snippet[:80].replace(chr(10),' ')!r}")
 
             # Keyword augmentation — catches identifiers semantic search misses
             kw_extras = self._keyword_search(self._code_collection, question, set(code_snip))
             if kw_extras:
                 log(self.repo_name, "RAG",
                     f"  Keyword search added {len(kw_extras)} extra chunk(s) not found semantically")
+                for i, snippet in enumerate(kw_extras):
+                    log(self.repo_name, "RAG", f"  KW[{i+1}] (keyword match)  {snippet[:80].replace(chr(10),' ')!r}")
             code_snip = code_snip + kw_extras
             code_text = "\n---\n".join(code_snip)
             log(self.repo_name, "RAG", f"Code: {len(code_snip)} results, {len(code_text)} chars")
