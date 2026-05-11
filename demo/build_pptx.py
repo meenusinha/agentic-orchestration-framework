@@ -72,10 +72,10 @@ def hline(slide, y):
     line.line.color.rgb = BORDER
     line.line.width = Emu(9525)
 
-def conn(slide, x1, y1, x2, y2, color=BLUE, lw=Emu(15876)):
-    """Draw a connector line and place a direction arrow character at the endpoint."""
+def conn(slide, x1, y1, x2, y2, color=BLUE, lw=Emu(15876), ctype=1):
+    """Draw a connector (ctype 1=straight, 2=elbow/angular) with arrowhead at (x2,y2)."""
     from lxml import etree
-    c = slide.shapes.add_connector(1, Inches(x1), Inches(y1), Inches(x2), Inches(y2))
+    c = slide.shapes.add_connector(ctype, Inches(x1), Inches(y1), Inches(x2), Inches(y2))
     c.line.color.rgb = color
     c.line.width = lw
     # Arrowhead via XML on the connector's spPr/ln element
@@ -99,6 +99,13 @@ def conn_label(slide, x1, y1, x2, y2, text, color=BLUE):
     mx, my = (x1 + x2) / 2, (y1 + y2) / 2
     add_text(slide, text, Inches(mx - 0.9), Inches(my - 0.17),
              Inches(1.8), Inches(0.32), size=8, color=color, align=PP_ALIGN.CENTER)
+
+def seq_badge(slide, n, x, y, color=BLUE):
+    """Small filled square with a sequence number, placed at (x, y)."""
+    add_box(slide, Inches(x - 0.14), Inches(y - 0.14), Inches(0.28), Inches(0.28),
+            fill=color, line=color)
+    add_text(slide, str(n), Inches(x - 0.14), Inches(y - 0.16), Inches(0.28), Inches(0.28),
+             size=8, bold=True, color=BG, align=PP_ALIGN.CENTER)
 
 # ── Slide builder functions ───────────────────────────────────────────────────
 
@@ -494,117 +501,181 @@ def slide_demo(prs):
 def slide_component_diagram(prs):
     s = new_slide(prs)
 
-    # Header
-    add_text(s, "COMPONENT DIAGRAM", Inches(0.4), Inches(0.15), Inches(12.5), Inches(0.28),
+    # ── Header ─────────────────────────────────────────────────────────────────
+    add_text(s, "DATA FLOW DIAGRAM", Inches(0.4), Inches(0.10), Inches(12.5), Inches(0.25),
              size=10, bold=True, color=BLUE, align=PP_ALIGN.CENTER)
-    add_text(s, "MCP Tool Calling & RAG Knowledge Pipeline",
-             Inches(0.4), Inches(0.45), Inches(12.5), Inches(0.40),
-             size=22, bold=True, color=WHITE, align=PP_ALIGN.CENTER)
+    add_text(s, "Agentic Orchestration — Components, Interfaces & Data Flow",
+             Inches(0.4), Inches(0.37), Inches(12.5), Inches(0.40),
+             size=19, bold=True, color=WHITE, align=PP_ALIGN.CENTER)
 
-    # ── Boxes ─────────────────────────────────────────────────────────────────
+    # ── Box geometry constants ─────────────────────────────────────────────────
+    COP_X, COP_Y, COP_W, COP_H     = 4.3,  0.83, 3.6,  0.62   # Copilot
+    ORC_X, ORC_Y, ORC_W, ORC_H     = 0.2,  2.15, 2.9,  0.90   # Orchestrator
+    AGT_X, AGT_W, AGT_H            = 3.5,  2.8,  0.65   # Repo Agents (stacked)
+    RAG_X, RAG_Y, RAG_W, RAG_H     = 7.1,  2.0,  2.7,  1.10   # RAG Engine
+    EMB_X, EMB_Y, EMB_W, EMB_H     = 10.3, 2.1,  2.8,  1.00   # Embedding Model
+    CHR_X, CHR_Y, CHR_W, CHR_H     = 7.1,  4.05, 2.7,  0.72   # ChromaDB
+    DOC_X, DOC_Y, DOC_W, DOC_H     = 6.65, 5.15, 1.9,  0.62   # .md Docs
+    SRC_X, SRC_Y, SRC_W, SRC_H     = 8.85, 5.15, 1.9,  0.62   # Source Code
+    LLM_X, LLM_Y, LLM_W, LLM_H     = 10.3, 3.95, 2.8,  1.60   # LLM not-used
 
-    # GitHub Copilot
-    add_box(s, Inches(4.6), Inches(0.92), Inches(3.0), Inches(0.55),
-            fill=RGBColor(0x2d, 0x1f, 0x47), line=PURPLE)
-    add_text(s, "GitHub Copilot  (Agent Mode)",
-             Inches(4.63), Inches(0.96), Inches(2.94), Inches(0.46),
+    # Derived midpoints / edges used for connectors
+    COP_BOT = COP_Y + COP_H                        # 1.45
+    COP_CX  = COP_X + COP_W / 2                    # 6.1
+    ORC_CX  = ORC_X + ORC_W / 2                    # 1.65
+    ORC_CY  = ORC_Y + ORC_H / 2                    # 2.60
+    ORC_R   = ORC_X + ORC_W                        # 3.10
+    RAG_CY  = RAG_Y + RAG_H / 2                    # 2.55
+    RAG_R   = RAG_X + RAG_W                        # 9.80
+    RAG_BOT = RAG_Y + RAG_H                        # 3.10
+    EMB_CY  = EMB_Y + EMB_H / 2                    # 2.60
+    CHR_CX  = CHR_X + CHR_W / 2                    # 8.45
+    CHR_BOT = CHR_Y + CHR_H                        # 4.77
+    DOC_CX  = DOC_X + DOC_W / 2                    # 7.60
+    SRC_CX  = SRC_X + SRC_W / 2                    # 9.80
+
+    agent_y  = [1.52 + i * 1.03 for i in range(3)]          # top y of each agent
+    agent_cy = [y + AGT_H / 2   for y in agent_y]           # centre y
+    AGT_R    = AGT_X + AGT_W                                 # 6.30
+
+    # ── Component boxes ────────────────────────────────────────────────────────
+
+    # GitHub Copilot — the LLM that synthesises the final answer
+    add_box(s, Inches(COP_X), Inches(COP_Y), Inches(COP_W), Inches(COP_H),
+            fill=RGBColor(0x2d,0x1f,0x47), line=PURPLE)
+    add_text(s, "GitHub Copilot  (Agent Mode  ·  LLM)",
+             Inches(COP_X+0.05), Inches(COP_Y+0.08), Inches(COP_W-0.10), Inches(COP_H-0.16),
              size=12, bold=True, color=PURPLE, align=PP_ALIGN.CENTER)
 
     # Orchestrator
-    add_box(s, Inches(0.3), Inches(2.15), Inches(2.85), Inches(0.90),
-            fill=RGBColor(0x0d, 0x1f, 0x12), line=GREEN)
-    add_text(s, "Orchestrator\nrouter_mcp_server.py\n« get_relevant_repos »",
-             Inches(0.34), Inches(2.21), Inches(2.77), Inches(0.78),
+    add_box(s, Inches(ORC_X), Inches(ORC_Y), Inches(ORC_W), Inches(ORC_H),
+            fill=RGBColor(0x0d,0x1f,0x12), line=GREEN)
+    add_text(s, "Orchestrator\nrouter_mcp_server.py\nget_relevant_repos",
+             Inches(ORC_X+0.05), Inches(ORC_Y+0.08), Inches(ORC_W-0.10), Inches(ORC_H-0.16),
              size=10, color=GREEN, align=PP_ALIGN.CENTER)
 
-    # Repo Agents (stacked)
+    # Repo Agents × 3
     for i, name in enumerate(["scan_manager", "illumination", "expose_sequence"]):
-        ay = 1.5 + i * 1.0
-        add_box(s, Inches(3.85), Inches(ay), Inches(2.8), Inches(0.62),
-                fill=RGBColor(0x0d, 0x1f, 0x35), line=BLUE)
+        ay = agent_y[i]
+        add_box(s, Inches(AGT_X), Inches(ay), Inches(AGT_W), Inches(AGT_H),
+                fill=RGBColor(0x0d,0x1f,0x35), line=BLUE)
         add_text(s, name,
-                 Inches(3.88), Inches(ay + 0.04), Inches(2.74), Inches(0.28),
+                 Inches(AGT_X+0.05), Inches(ay+0.04), Inches(AGT_W-0.10), Inches(0.28),
                  size=11, bold=True, color=BLUE, align=PP_ALIGN.CENTER)
-        add_text(s, "mcp_server.py  « query_repo »",
-                 Inches(3.88), Inches(ay + 0.34), Inches(2.74), Inches(0.22),
-                 size=9, color=BLUE, align=PP_ALIGN.CENTER)
+        add_text(s, "mcp_server.py  ·  query_repo",
+                 Inches(AGT_X+0.05), Inches(ay+0.37), Inches(AGT_W-0.10), Inches(0.20),
+                 size=8, color=BLUE, align=PP_ALIGN.CENTER)
 
     # RAG Engine
-    add_box(s, Inches(7.3), Inches(2.1), Inches(2.6), Inches(1.05),
-            fill=RGBColor(0x2a, 0x16, 0x00), line=ORANGE)
-    add_text(s, "RAG Engine\nrepo_rag.py\nsemantic + keyword search",
-             Inches(7.34), Inches(2.17), Inches(2.52), Inches(0.91),
+    add_box(s, Inches(RAG_X), Inches(RAG_Y), Inches(RAG_W), Inches(RAG_H),
+            fill=RGBColor(0x2a,0x16,0x00), line=ORANGE)
+    add_text(s, "RAG Engine\nrepo_rag.py\nhybrid: semantic + keyword",
+             Inches(RAG_X+0.05), Inches(RAG_Y+0.10), Inches(RAG_W-0.10), Inches(RAG_H-0.20),
              size=11, color=ORANGE, align=PP_ALIGN.CENTER)
 
+    # Embedding Model
+    add_box(s, Inches(EMB_X), Inches(EMB_Y), Inches(EMB_W), Inches(EMB_H),
+            fill=RGBColor(0x10,0x18,0x25), line=BLUE)
+    add_text(s, "Embedding Model\nall-MiniLM-L6-v2\nlocal  ·  offline  ·  ~90 MB",
+             Inches(EMB_X+0.05), Inches(EMB_Y+0.10), Inches(EMB_W-0.10), Inches(EMB_H-0.20),
+             size=10, color=WHITE, align=PP_ALIGN.CENTER)
+
     # ChromaDB
-    add_box(s, Inches(7.3), Inches(4.0), Inches(2.6), Inches(0.70),
-            fill=RGBColor(0x0d, 0x1f, 0x12), line=GREEN)
-    add_text(s, "ChromaDB  •  .chroma_db/\nvector store  (L2 distance)",
-             Inches(7.34), Inches(4.06), Inches(2.52), Inches(0.58),
+    add_box(s, Inches(CHR_X), Inches(CHR_Y), Inches(CHR_W), Inches(CHR_H),
+            fill=RGBColor(0x0d,0x1f,0x12), line=GREEN)
+    add_text(s, "ChromaDB  ·  .chroma_db/\nvector store  ·  L2 distance",
+             Inches(CHR_X+0.05), Inches(CHR_Y+0.08), Inches(CHR_W-0.10), Inches(CHR_H-0.16),
              size=11, color=GREEN, align=PP_ALIGN.CENTER)
 
     # Data sources
-    add_box(s, Inches(6.85), Inches(5.35), Inches(1.95), Inches(0.60),
-            fill=RGBColor(0x16, 0x1b, 0x22), line=GREY)
+    add_box(s, Inches(DOC_X), Inches(DOC_Y), Inches(DOC_W), Inches(DOC_H),
+            fill=RGBColor(0x16,0x1b,0x22), line=GREY)
     add_text(s, ".md Docs\nknowledge/",
-             Inches(6.87), Inches(5.40), Inches(1.91), Inches(0.50),
+             Inches(DOC_X+0.03), Inches(DOC_Y+0.06), Inches(DOC_W-0.06), Inches(DOC_H-0.12),
              size=10, color=GREY, align=PP_ALIGN.CENTER)
 
-    add_box(s, Inches(9.05), Inches(5.35), Inches(1.95), Inches(0.60),
-            fill=RGBColor(0x16, 0x1b, 0x22), line=GREY)
+    add_box(s, Inches(SRC_X), Inches(SRC_Y), Inches(SRC_W), Inches(SRC_H),
+            fill=RGBColor(0x16,0x1b,0x22), line=GREY)
     add_text(s, "Source Code\n./src  (12 languages)",
-             Inches(9.07), Inches(5.40), Inches(1.91), Inches(0.50),
+             Inches(SRC_X+0.03), Inches(SRC_Y+0.06), Inches(SRC_W-0.06), Inches(SRC_H-0.12),
              size=10, color=GREY, align=PP_ALIGN.CENTER)
 
-    # ── Connectors ────────────────────────────────────────────────────────────
+    # ── LLM "not used here" annotation ────────────────────────────────────────
+    add_box(s, Inches(LLM_X), Inches(LLM_Y), Inches(LLM_W), Inches(LLM_H),
+            fill=RGBColor(0x18,0x07,0x07), line=RED)
+    add_text(s, "⚡  Normally: LLM API calls",
+             Inches(LLM_X+0.08), Inches(LLM_Y+0.08), Inches(LLM_W-0.16), Inches(0.25),
+             size=9, bold=True, color=RED)
+    add_text(s,
+             "✗  Embedding API  (text-embedding-ada-002)\n"
+             "   → replaced by all-MiniLM-L6-v2\n"
+             "      runs locally, no API key, no cloud\n\n"
+             "✗  Answer generation  (GPT-4 / Claude API)\n"
+             "   → not needed: Copilot IS the LLM\n"
+             "      receives chunks, synthesises answer",
+             Inches(LLM_X+0.08), Inches(LLM_Y+0.38), Inches(LLM_W-0.16), Inches(LLM_H-0.50),
+             size=8, color=RED)
 
-    # Copilot → Orchestrator
-    conn(s, 5.4, 1.47, 1.72, 2.15, color=PURPLE)
-    conn_label(s, 5.4, 1.47, 1.72, 2.15, "get_relevant_repos", color=PURPLE)
+    # ── Angular (elbow) connectors + sequence badges ───────────────────────────
 
-    # Copilot → scan_manager (represents query_repo pattern for all 3)
-    conn(s, 6.75, 1.47, 5.25, 1.50, color=BLUE)
-    conn_label(s, 6.75, 1.47, 5.25, 1.50, "query_repo (×3)", color=BLUE)
+    # ① Copilot → Orchestrator  :  get_relevant_repos(query)  →  ["repo1","repo2"]
+    conn(s, COP_CX-0.8, COP_BOT, ORC_CX, ORC_Y, color=PURPLE, ctype=2)
+    seq_badge(s, 1, (COP_CX-0.8+ORC_CX)/2, (COP_BOT+ORC_Y)/2, color=PURPLE)
 
-    # Orchestrator → Repo Agents (routing)
-    conn(s, 3.15, 2.52, 3.85, 1.81, color=GREEN)
-    conn(s, 3.15, 2.60, 3.85, 2.81, color=GREEN)
-    conn(s, 3.15, 2.68, 3.85, 3.81, color=GREEN)
+    # ② Copilot → Repo Agents  :  query_repo(feature_request)  →  RELEVANT KNOWLEDGE
+    #    Arrow drawn once to scan_manager; represents all 3 calls (labelled ×3)
+    conn(s, COP_CX+0.6, COP_BOT, AGT_X+AGT_W/2, agent_y[0], color=BLUE, ctype=2)
+    seq_badge(s, 2, (COP_CX+0.6+AGT_X+AGT_W/2)/2, (COP_BOT+agent_y[0])/2, color=BLUE)
+    add_text(s, "×3", Inches((COP_CX+0.6+AGT_X+AGT_W/2)/2 + 0.12),
+             Inches((COP_BOT+agent_y[0])/2 - 0.10), Inches(0.35), Inches(0.22),
+             size=8, bold=True, color=BLUE)
 
-    # Repo Agents → RAG Engine
-    conn(s, 6.65, 1.81, 7.3, 2.38, color=BLUE)
-    conn(s, 6.65, 2.81, 7.3, 2.62, color=BLUE)
-    conn(s, 6.65, 3.81, 7.3, 2.87, color=BLUE)
-    conn_label(s, 6.65, 2.81, 7.3, 2.62, "query()", color=BLUE)
+    # ③ Orchestrator → each Repo Agent  :  query_repo(q)  →  content length score
+    for cy in agent_cy:
+        conn(s, ORC_R, ORC_CY, AGT_X, cy, color=GREEN, ctype=2)
+    seq_badge(s, 3, (ORC_R+AGT_X)/2, (ORC_CY+agent_cy[1])/2, color=GREEN)
 
-    # RAG Engine → ChromaDB
-    conn(s, 8.6, 3.15, 8.6, 4.0, color=ORANGE)
-    conn_label(s, 8.6, 3.15, 8.6, 4.0, "vector search", color=ORANGE)
+    # ④ Repo Agents → RAG Engine  :  query(feature_request)  →  chunks + L2 distances
+    for cy in agent_cy:
+        conn(s, AGT_R, cy, RAG_X, RAG_CY, color=BLUE, ctype=2)
+    seq_badge(s, 4, (AGT_R+RAG_X)/2, (agent_cy[1]+RAG_CY)/2, color=BLUE)
 
-    # ChromaDB → Data Sources
-    conn(s, 7.95, 4.70, 7.82, 5.35, color=GREY)
-    conn(s, 9.25, 4.70, 10.07, 5.35, color=GREY)
-    conn_label(s, 8.6, 4.70, 8.95, 5.35, "indexed", color=GREY)
+    # ⑤ RAG Engine ↔ Embedding Model  :  encode(text)  ↔  384-dim float[]
+    conn(s, RAG_R, RAG_CY, EMB_X, EMB_CY, color=WHITE, ctype=2)
+    seq_badge(s, 5, (RAG_R+EMB_X)/2, (RAG_CY+EMB_CY)/2, color=WHITE)
 
-    # ── Footer note ───────────────────────────────────────────────────────────
-    add_text(s, "All MCP communication via stdio  —  JSON-RPC 2.0  —  no network ports, no cloud",
-             Inches(0.4), Inches(7.1), Inches(12.5), Inches(0.28),
-             size=9, color=GREY, align=PP_ALIGN.CENTER)
+    # ⑥ RAG Engine → ChromaDB  :  vector similarity query  →  top-k chunks + L2 dist
+    conn(s, CHR_CX, RAG_BOT, CHR_CX, CHR_Y, color=ORANGE, ctype=2)
+    seq_badge(s, 6, CHR_CX, (RAG_BOT+CHR_Y)/2, color=ORANGE)
 
-    # ── Legend ────────────────────────────────────────────────────────────────
-    legend = [
-        (PURPLE, "AI Interface"),
-        (GREEN,  "Orchestrator / Storage"),
-        (BLUE,   "Repo Agent  (MCP server)"),
-        (ORANGE, "RAG Engine"),
-        (GREY,   "Data Source"),
+    # ⑦ Docs + Source → ChromaDB  :  indexed at startup  →  embeddings stored
+    conn(s, DOC_CX, DOC_Y, CHR_CX-0.45, CHR_BOT, color=GREY, ctype=2)
+    conn(s, SRC_CX, SRC_Y, CHR_CX+0.45, CHR_BOT, color=GREY, ctype=2)
+    seq_badge(s, 7, (DOC_CX+CHR_CX-0.45)/2, (DOC_Y+CHR_BOT)/2, color=GREY)
+
+    # ── Sequence legend (2-column footer) ─────────────────────────────────────
+    leg_left = [
+        (1, PURPLE, "get_relevant_repos(query_text)  →  [repo1, repo2]  (MCP/stdio, JSON-RPC 2.0)"),
+        (2, BLUE,   "query_repo(feature_request)  →  RELEVANT KNOWLEDGE:...  (MCP/stdio, ×3 calls)"),
+        (3, GREEN,  "route  →  query_repo on all repos  →  min(len/800, 1.0) score, return top-2"),
+        (4, BLUE,   "query(feature_request)  →  chunks + L2 distances  (internal, per-agent)"),
     ]
-    lx = Inches(0.4)
-    for col, lbl in legend:
-        add_box(s, lx, Inches(6.72), Inches(0.18), Inches(0.18), fill=col, line=col)
-        add_text(s, lbl, lx + Inches(0.22), Inches(6.71), Inches(2.1), Inches(0.22),
-                 size=9, color=GREY)
-        lx += Inches(2.55)
+    leg_right = [
+        (5, WHITE,  "encode(text)  →  384-dim float[]  (sentence-transformers, local CPU/GPU)"),
+        (6, ORANGE, "vector similarity search  →  top-k chunks + L2 dist  (ChromaDB)"),
+        (7, GREY,   "indexed at startup  →  text split → embed → stored in .chroma_db/"),
+    ]
+    row_h = Inches(0.185)
+    for i, (n, col, text) in enumerate(leg_left):
+        y = Inches(6.18) + i * row_h
+        add_box(s, Inches(0.25), y, Inches(0.22), Inches(0.155), fill=col, line=col)
+        add_text(s, f"{n}  {text}", Inches(0.52), y - Inches(0.01), Inches(6.0), Inches(0.18),
+                 size=7.5, color=GREY)
+    for i, (n, col, text) in enumerate(leg_right):
+        y = Inches(6.18) + i * row_h
+        add_box(s, Inches(6.8), y, Inches(0.22), Inches(0.155), fill=col, line=col)
+        add_text(s, f"{n}  {text}", Inches(7.07), y - Inches(0.01), Inches(6.0), Inches(0.18),
+                 size=7.5, color=GREY)
 
 
 # ── Build presentation ────────────────────────────────────────────────────────
