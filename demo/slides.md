@@ -18,7 +18,6 @@ style: |
   table { width: 100%; border-collapse: collapse; }
   th { background: #161b22; color: #58a6ff; border: 1px solid #30363d; padding: 8px 12px; }
   td { border: 1px solid #30363d; padding: 8px 12px; color: #c9d1d9; font-size: 0.85em; }
-  .lead h1 { font-size: 2.4em; }
   a { color: #58a6ff; }
   section::after { color: #8b949e; font-size: 0.75em; }
   blockquote { border-left: 4px solid #58a6ff; color: #8b949e; background: #161b22; padding: 10px 16px; border-radius: 0 6px 6px 0; }
@@ -29,7 +28,7 @@ style: |
 
 # Multi-Repo Agentic Orchestration Framework
 
-### Give your AI assistant cross-repo awareness
+### Cross-repo AI awareness for lithography software development
 
 &nbsp;
 
@@ -42,18 +41,18 @@ style: |
 &nbsp;
 
 ```
-  📦 Frontend       🤖 Copilot        📦 Backend        📦 Services
-  ─────────────     ─────────────     ─────────────     ─────────────
-  your code          only sees          invisible         invisible
-                    this repo              ❌                ❌
+  📦 scan_manager   🤖 Copilot       📦 illumination   📦 expose_sequence
+  ──────────────    ─────────────    ───────────────   ──────────────────
+  your code          only sees          invisible            invisible
+                    this repo              ❌                   ❌
 ```
 
 &nbsp;
 
-- 🔴 Feature requests span **multiple repos** — but Copilot answers from one
-- 🔴 Suggested changes **break contracts** with other repos it cannot see
-- 🔴 Developer must **manually gather context** before every cross-repo question
-- 🔴 Solutions are **incomplete** — only one piece of the puzzle
+- 🔴 A dose control change in `expose_sequence` must align with `scan_manager` timing — Copilot cannot see this
+- 🔴 Illumination parameter updates affect exposure logic in a separate repo — invisible to the AI
+- 🔴 Developer must **manually gather context** from all lithography subsystem repos before every question
+- 🔴 Solutions are **incomplete** — only one subsystem's perspective
 
 ---
 
@@ -70,15 +69,16 @@ style: |
            └────────────────┘
             /       |       \
            ▼        ▼        ▼
-       📦 Repo A  📦 Repo B  📦 Repo C
-       (agent)   (agent)   (agent)
-       RAG index  RAG index  RAG index
+    📦 scan_manager  📦 illumination  📦 expose_sequence
+       (agent)          (agent)           (agent)
+       RAG index        RAG index         RAG index
 ```
 
 &nbsp;
 
-> Each repo has its own knowledge base. The orchestrator routes intelligently.
-> Copilot synthesises everything into a **complete cross-repo answer**.
+> Each lithography subsystem repo has its own knowledge base.
+> The orchestrator routes intelligently to the most relevant ones.
+> Copilot synthesises everything into a **complete cross-subsystem answer**.
 
 ---
 
@@ -91,7 +91,7 @@ style: |
 | **AI Interface** | GitHub Copilot + Agent mode | Developer's entry point |
 | **Instructions** | `copilot-instructions.md` | Tells Copilot to call MCP tools |
 | **Tool Config** | `.vscode/mcp.json` (auto-generated) | Wires up all MCP servers |
-| **Orchestrator** | `router_mcp_server.py` | Routes to relevant repos |
+| **Orchestrator** | `router_mcp_server.py` | Routes to relevant subsystem repos |
 | **Repo Agents** | `mcp_server.py` (per repo) | Exposes `query_repo` tool |
 | **Knowledge** | `repo_rag.py` + ChromaDB | Indexes docs + source, serves queries |
 | **Embedding** | `all-MiniLM-L6-v2` (local) | Converts text to vectors |
@@ -113,7 +113,7 @@ style: |
 | **ChromaDB** | Vector database | Local, persistent, no server needed |
 | **sentence-transformers** | Text → embeddings | Local model, no API calls |
 | **all-MiniLM-L6-v2** | Embedding model (~90 MB) | Fast, accurate, fully offline |
-| **pysqlite3-binary** | SQLite for ChromaDB | Bundles modern SQLite on older OS |
+| **pysqlite3-binary** | SQLite for ChromaDB | Bundles modern SQLite on RHEL8 |
 | **PyYAML** | Config parsing | Human-editable `config.yaml` |
 | **Python 3.11+** | Runtime | Type hints, performance |
 
@@ -124,39 +124,40 @@ style: |
 &nbsp;
 
 ```
-Developer types a feature request in Copilot chat
+Developer: "Add real-time dose control feedback during wafer exposure"
               │
     ┌─────────▼──────────┐
     │  STEP 1 — Route    │  orchestrator_router.get_relevant_repos()
-    │                    │  → calls each repo's RAG, scores by content length
-    │                    │  → returns top 2 most relevant repos
+    │                    │  → queries scan_manager, illumination, expose_sequence RAGs
+    │                    │  → returns top 2: expose_sequence (0.91), illumination (0.74)
     └─────────┬──────────┘
     ┌─────────▼──────────┐
-    │  STEP 2 — Own repo │  <this_repo>.query_repo()
-    │                    │  → searches own docs + source via RAG
+    │  STEP 2 — Own repo │  scan_manager.query_repo()
+    │                    │  → retrieves scan timing, stage control docs + source
     └─────────┬──────────┘
     ┌─────────▼──────────┐
-    │  STEP 3 — Peers    │  <peer1>.query_repo()  +  <peer2>.query_repo()
-    │                    │  → retrieves relevant knowledge from each
+    │  STEP 3 — Peers    │  expose_sequence.query_repo() + illumination.query_repo()
+    │                    │  → retrieves dose calculation, pulse control knowledge
     └─────────┬──────────┘
     ┌─────────▼──────────┐
     │  STEP 4 — Synthesise│  Feature Analysis Document
-    │                    │  → Current State per repo + Solution Design
+    │                    │  → Current State + cross-subsystem Solution Design
     └────────────────────┘
 ```
 
 ---
 
-## RAG — How each agent "knows" its codebase
+## RAG — How each agent "knows" its subsystem
 
 &nbsp;
 
 **Phase 1 — Indexing** *(runs once on first start)*
 
 ```
-📄 .md docs  ──┐
-               ├──▶  split into chunks  ──▶  embed (all-MiniLM-L6-v2)  ──▶  💾 ChromaDB
-💻 source files┘
+📄 subsystem docs (.md)  ──┐
+                            ├──▶  split into chunks  ──▶  embed  ──▶  💾 ChromaDB
+💻 source code              ┘
+   (e.g. expose_sequence/*/com/*)
 ```
 
 &nbsp;
@@ -164,18 +165,18 @@ Developer types a feature request in Copilot chat
 **Phase 2 — Query** *(every call to `query_repo`)*
 
 ```
-❓ feature request
+❓ "dose control feedback during exposure"
       │
       ▼
-  embed query  ──▶  search docs collection (top 3 chunks)
+  embed query  ──▶  search docs  (top 3 chunks: DoseController, ExposureLoop ...)
                           │
-              thin (<100 chars)?  ──▶  search source collection
+              thin (<100 chars)?  ──▶  search source code
                           │
                           ▼
-             📤  RELEVANT KNOWLEDGE: ...
+             📤  RELEVANT KNOWLEDGE: DoseController adjusts pulse width ...
 ```
 
-> Routing score = `min(content_length / 800, 1.0)` — longer response = more relevant repo
+> Routing score = `min(content_length / 800, 1.0)`
 
 ---
 
@@ -183,7 +184,7 @@ Developer types a feature request in Copilot chat
 
 &nbsp;
 
-**Each MCP server is a Python subprocess. Communication is over stdin/stdout.**
+**Each MCP server is a Python subprocess. Communication is over stdin/stdout — no network.**
 
 ```
 VS Code / test_mcp.py
@@ -192,10 +193,11 @@ VS Code / test_mcp.py
       │                                                         MCP server
       │  1.  { "method": "initialize" }                        (Python process)
       │  2.  { "method": "notifications/initialized" }
-      │  3.  { "method": "tools/call", "name": "query_repo" }
+      │  3.  { "method": "tools/call", "name": "query_repo",
+      │          "arguments": { "feature_request": "dose control..." } }
       │
       │  stdout ◀────────────────────────────────────────────────────
-      │                  { "result": { "content": [{ "text": "..." }] } }
+      │      { "result": { "content": [{ "text": "RELEVANT KNOWLEDGE:..." }] } }
 ```
 
 &nbsp;
@@ -203,7 +205,7 @@ VS Code / test_mcp.py
 | MCP Server | Tool exposed | Called by |
 |---|---|---|
 | `router_mcp_server.py` | `get_relevant_repos` | Copilot (step 1) |
-| `mcp_server.py` (per repo) | `query_repo` | Copilot + orchestrator |
+| `mcp_server.py` (per subsystem repo) | `query_repo` | Copilot + orchestrator |
 
 ---
 
@@ -218,20 +220,21 @@ VS Code / test_mcp.py
 
 3.  pip install -r requirements.txt
 
-4.  Edit orchestrator/mcp/config.yaml  ← list your repos + paths
+4.  Edit orchestrator/mcp/config.yaml
+      repos:
+        - name: scan_manager     path: /path/to/scan_manager
+        - name: illumination     path: /path/to/illumination
+        - name: expose_sequence  path: /path/to/expose_sequence
 
 5.  For each repo:
-      cp repo-agent/mcp/        /path/to/repo/mcp/
-      cp repo-agent/knowledge/  /path/to/repo/knowledge/
-      Edit /path/to/repo/mcp/config.yaml  ← repo name + src_path
+      cp repo-agent/mcp/       /path/to/repo/mcp/
+      cp repo-agent/knowledge/ /path/to/repo/knowledge/
+      Edit mcp/config.yaml  ←  repo_name, src_path: ./BB-*/*/com
 
-6.  python orchestrator/setup.py  ← generates mcp.json + copilot-instructions.md
+6.  python orchestrator/setup.py  ← generates mcp.json for all repos
 
-7.  source .venv/bin/activate
-    code /path/to/repo  ← VS Code picks up mcp.json automatically
+7.  source .venv/bin/activate  &&  code /path/to/repo
 ```
-
-> **Only files marked ★ are ever edited by the user — everything else is generated**
 
 ---
 
@@ -249,10 +252,10 @@ VS Code / test_mcp.py
 tail -f /tmp/mcp-orchestration.log
 
 # Terminal 2 — run the demo
-python test_mcp.py "authentication session token management"
+python test_mcp.py "dose control feedback wafer exposure scan timing"
 ```
 
 &nbsp;
 
 Output saved to **`feature_analysis.md`**
-Paste into Copilot chat → **cross-repo Solution Design**
+Paste into Copilot chat → **cross-subsystem Solution Design**
