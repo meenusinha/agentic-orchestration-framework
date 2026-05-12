@@ -498,188 +498,406 @@ def slide_demo(prs):
                       fill=RGBColor(0x0d,0x1f,0x12), line=GREEN, align=PP_ALIGN.CENTER)
 
 
-def slide_component_diagram(prs):
+def slide_rag_init_flow(prs):
+    """Phase 1 — RAG index creation per MCP server (cold start)."""
     s = new_slide(prs)
 
     # ── Header ─────────────────────────────────────────────────────────────────
-    add_text(s, "DATA FLOW DIAGRAM", Inches(0.4), Inches(0.10), Inches(12.5), Inches(0.25),
+    add_text(s, "DATA FLOW — PHASE 1  ·  INDEX CREATION",
+             Inches(0.4), Inches(0.08), Inches(12.5), Inches(0.26),
              size=10, bold=True, color=BLUE, align=PP_ALIGN.CENTER)
-    add_text(s, "Agentic Orchestration — Components, Interfaces & Data Flow",
-             Inches(0.4), Inches(0.37), Inches(12.5), Inches(0.40),
-             size=19, bold=True, color=WHITE, align=PP_ALIGN.CENTER)
+    add_text(s, "RAG Index Built Once per MCP Server on Cold Start",
+             Inches(0.4), Inches(0.35), Inches(12.5), Inches(0.42),
+             size=20, bold=True, color=WHITE, align=PP_ALIGN.CENTER)
+    hline(s, Inches(0.83))
 
-    # ── Box geometry constants ─────────────────────────────────────────────────
-    # Right column (x=7.1): RAG → Embedding → ChromaDB stacked vertically.
-    # Every vector entering or leaving ChromaDB must pass through the Embedding Model.
-    COP_X, COP_Y, COP_W, COP_H  = 4.3,  0.83, 3.6,  0.62   # Copilot
-    ORC_X, ORC_Y, ORC_W, ORC_H  = 0.2,  2.15, 2.9,  0.90   # Orchestrator
-    AGT_X, AGT_W, AGT_H         = 3.5,  2.8,  0.65           # Repo Agents
-    RAG_X, RAG_Y, RAG_W, RAG_H  = 7.1,  1.75, 2.7,  0.85   # RAG Engine
-    EMB_X, EMB_Y, EMB_W, EMB_H  = 7.1,  2.80, 2.7,  0.78   # Embedding (between RAG & ChromaDB)
-    CHR_X, CHR_Y, CHR_W, CHR_H  = 7.1,  3.80, 2.7,  0.72   # ChromaDB
-    DOC_X, DOC_Y, DOC_W, DOC_H  = 6.65, 5.05, 1.9,  0.62   # .md Docs
-    SRC_X, SRC_Y, SRC_W, SRC_H  = 8.85, 5.05, 1.9,  0.62   # Source Code
-    LLM_X, LLM_Y, LLM_W, LLM_H  = 10.3, 1.75, 2.8,  2.05   # LLM not-used
+    # ── Box geometry (all coords in inches) ──────────────────────────────────────
+    # Slide center x = 13.33/2 = 6.665
+    TX, TY, TW, TH = 0.20, 1.00, 2.60, 0.75   # test_mcp.py
+    MX, MY, MW, MH = 4.20, 1.00, 5.30, 0.75   # mcp_server.py
+    DX, DY, DW, DH = 1.50, 2.38, 3.20, 0.78   # knowledge/*.md
+    SX, SY, SW, SH = 8.45, 2.38, 3.45, 0.78   # ./src/ source code
+    KX, KY, KW, KH = 3.00, 3.58, 7.30, 1.00   # Chunker
+    EX, EY, EW, EH = 4.05, 5.00, 5.25, 0.85   # Embedding Model
+    VX, VY, VW, VH = 3.50, 6.18, 6.30, 0.78   # ChromaDB  (V for Vector store)
 
-    # Derived
-    COP_BOT = COP_Y + COP_H                  # 1.45
-    COP_CX  = COP_X + COP_W / 2             # 6.10
-    ORC_CX  = ORC_X + ORC_W / 2             # 1.65
-    ORC_CY  = ORC_Y + ORC_H / 2             # 2.60
-    ORC_R   = ORC_X + ORC_W                 # 3.10
-    RAG_CX  = RAG_X + RAG_W / 2             # 8.45
-    RAG_CY  = RAG_Y + RAG_H / 2             # 2.175
-    RAG_BOT = RAG_Y + RAG_H                 # 2.60
-    EMB_BOT = EMB_Y + EMB_H                 # 3.58
-    CHR_CX  = CHR_X + CHR_W / 2             # 8.45
-    CHR_BOT = CHR_Y + CHR_H                 # 4.52
-    DOC_CX  = DOC_X + DOC_W / 2             # 7.60
-    SRC_CX  = SRC_X + SRC_W / 2             # 9.80
-
-    agent_y  = [1.52 + i * 1.03 for i in range(3)]
-    agent_cy = [y + AGT_H / 2   for y in agent_y]
-    AGT_R    = AGT_X + AGT_W                 # 6.30
+    # derived midpoints / edges
+    T_r   = TX + TW;   T_cy  = TY + TH/2
+    M_l   = MX;        M_cx  = MX + MW/2;  M_bot = MY + MH
+    D_cx  = DX + DW/2; D_bot = DY + DH
+    S_cx  = SX + SW/2; S_bot = SY + SH
+    K_cx  = KX + KW/2; K_bot = KY + KH
+    E_cx  = EX + EW/2; E_top = EY;         E_bot = EY + EH
+    V_cx  = VX + VW/2; V_top = VY
 
     # ── Component boxes ────────────────────────────────────────────────────────
 
-    # GitHub Copilot — the LLM that synthesises the final answer
-    add_box(s, Inches(COP_X), Inches(COP_Y), Inches(COP_W), Inches(COP_H),
-            fill=RGBColor(0x2d,0x1f,0x47), line=PURPLE)
-    add_text(s, "GitHub Copilot  (Agent Mode  ·  LLM)",
-             Inches(COP_X+0.05), Inches(COP_Y+0.08), Inches(COP_W-0.10), Inches(COP_H-0.16),
-             size=12, bold=True, color=PURPLE, align=PP_ALIGN.CENTER)
+    def bx(slide, title, sub, x, y, w, h, fill, ln, tc=WHITE, sc=None):
+        add_box(slide, Inches(x), Inches(y), Inches(w), Inches(h), fill=fill, line=ln)
+        p = 0.10
+        add_text(slide, title, Inches(x+p), Inches(y+p), Inches(w-2*p), Inches(h*0.48),
+                 size=11, bold=True, color=tc, align=PP_ALIGN.CENTER)
+        if sub:
+            add_text(slide, sub, Inches(x+p), Inches(y+h*0.52), Inches(w-2*p), Inches(h*0.42),
+                     size=8, color=sc or GREY, align=PP_ALIGN.CENTER)
 
-    # Orchestrator
-    add_box(s, Inches(ORC_X), Inches(ORC_Y), Inches(ORC_W), Inches(ORC_H),
-            fill=RGBColor(0x0d,0x1f,0x12), line=GREEN)
-    add_text(s, "Orchestrator\nrouter_mcp_server.py\nget_relevant_repos",
-             Inches(ORC_X+0.05), Inches(ORC_Y+0.08), Inches(ORC_W-0.10), Inches(ORC_H-0.16),
-             size=10, color=GREEN, align=PP_ALIGN.CENTER)
+    bx(s, "test_mcp.py", "MCP client  ·  subprocess.run()",
+       TX, TY, TW, TH, RGBColor(0x0d,0x1f,0x0d), GREEN, GREEN)
 
-    # Repo Agents × 3
-    for i, name in enumerate(["scan_manager", "illumination", "expose_sequence"]):
-        ay = agent_y[i]
-        add_box(s, Inches(AGT_X), Inches(ay), Inches(AGT_W), Inches(AGT_H),
-                fill=RGBColor(0x0d,0x1f,0x35), line=BLUE)
-        add_text(s, name,
-                 Inches(AGT_X+0.05), Inches(ay+0.04), Inches(AGT_W-0.10), Inches(0.28),
-                 size=11, bold=True, color=BLUE, align=PP_ALIGN.CENTER)
-        add_text(s, "mcp_server.py  ·  query_repo",
-                 Inches(AGT_X+0.05), Inches(ay+0.37), Inches(AGT_W-0.10), Inches(0.20),
-                 size=8, color=BLUE, align=PP_ALIGN.CENTER)
+    bx(s, "mcp_server.py  ·  RepoRAG.build_or_load_index()",
+       "checks collection exists → builds if absent → loads if cached",
+       MX, MY, MW, MH, RGBColor(0x0d,0x1f,0x35), BLUE, BLUE)
 
-    # RAG Engine  (top of right column)
-    add_box(s, Inches(RAG_X), Inches(RAG_Y), Inches(RAG_W), Inches(RAG_H),
-            fill=RGBColor(0x2a,0x16,0x00), line=ORANGE)
-    add_text(s, "RAG Engine\nrepo_rag.py\nhybrid: semantic + keyword",
-             Inches(RAG_X+0.05), Inches(RAG_Y+0.08), Inches(RAG_W-0.10), Inches(RAG_H-0.16),
-             size=11, color=ORANGE, align=PP_ALIGN.CENTER)
+    bx(s, "knowledge/*.md", "documentation · markdown files",
+       DX, DY, DW, DH, RGBColor(0x16,0x1b,0x22), GREY, WHITE)
 
-    # Embedding Model  (between RAG and ChromaDB — all vectors pass through here)
-    add_box(s, Inches(EMB_X), Inches(EMB_Y), Inches(EMB_W), Inches(EMB_H),
+    bx(s, "./src/  source code", ".py  .cpp  .h  .java  .go  .rs  ···  12 languages",
+       SX, SY, SW, SH, RGBColor(0x16,0x1b,0x22), GREY, WHITE)
+
+    add_box(s, Inches(KX), Inches(KY), Inches(KW), Inches(KH),
+            fill=RGBColor(0x22,0x14,0x00), line=ORANGE)
+    add_text(s, "Chunker  (repo_rag.py)",
+             Inches(KX+0.10), Inches(KY+0.10), Inches(KW-0.20), Inches(0.30),
+             size=12, bold=True, color=ORANGE, align=PP_ALIGN.CENTER)
+    add_text(s, "Docs → paragraph split     ·     Code → function / class boundary split\n"
+                "max_chunk_chars = 1500   ·   chunk_overlap_chars = 150   ·   min chunk = 40 chars",
+             Inches(KX+0.14), Inches(KY+0.44), Inches(KW-0.28), Inches(0.50),
+             size=10, color=GREY, align=PP_ALIGN.CENTER)
+
+    add_box(s, Inches(EX), Inches(EY), Inches(EW), Inches(EH),
             fill=RGBColor(0x10,0x18,0x25), line=BLUE)
-    add_text(s, "Embedding Model\nall-MiniLM-L6-v2\nlocal  ·  offline  ·  ~90 MB",
-             Inches(EMB_X+0.05), Inches(EMB_Y+0.08), Inches(EMB_W-0.10), Inches(EMB_H-0.16),
-             size=10, color=WHITE, align=PP_ALIGN.CENTER)
+    add_text(s, "Embedding Model  ·  all-MiniLM-L6-v2  ·  local  ·  offline",
+             Inches(EX+0.10), Inches(EY+0.10), Inches(EW-0.20), Inches(0.30),
+             size=12, bold=True, color=BLUE, align=PP_ALIGN.CENTER)
+    add_text(s, "encode(texts, normalize_embeddings=True, batch_size=512)  ·  22.7 M params  ·  ~300 MB RAM\n"
+                "text chunks  →  384-dim float32 vectors  (encoder-only: one-way, no inverse)",
+             Inches(EX+0.14), Inches(EY+0.44), Inches(EW-0.28), Inches(0.36),
+             size=10, color=GREY, align=PP_ALIGN.CENTER)
 
-    # ChromaDB
-    add_box(s, Inches(CHR_X), Inches(CHR_Y), Inches(CHR_W), Inches(CHR_H),
+    add_box(s, Inches(VX), Inches(VY), Inches(VW), Inches(VH),
             fill=RGBColor(0x0d,0x1f,0x12), line=GREEN)
-    add_text(s, "ChromaDB  ·  .chroma_db/\nvector store  ·  L2 distance",
-             Inches(CHR_X+0.05), Inches(CHR_Y+0.08), Inches(CHR_W-0.10), Inches(CHR_H-0.16),
-             size=11, color=GREEN, align=PP_ALIGN.CENTER)
-
-    # Data sources
-    add_box(s, Inches(DOC_X), Inches(DOC_Y), Inches(DOC_W), Inches(DOC_H),
-            fill=RGBColor(0x16,0x1b,0x22), line=GREY)
-    add_text(s, ".md Docs\nknowledge/",
-             Inches(DOC_X+0.03), Inches(DOC_Y+0.06), Inches(DOC_W-0.06), Inches(DOC_H-0.12),
+    add_text(s, "ChromaDB  ·  .chroma_db/  ·  SQLite WAL",
+             Inches(VX+0.10), Inches(VY+0.10), Inches(VW-0.20), Inches(0.28),
+             size=12, bold=True, color=GREEN, align=PP_ALIGN.CENTER)
+    add_text(s, "collection.add(documents=text_chunks, embeddings=vectors, ids=[…])\n"
+                "docs_collection  +  code_collection  ·  persistent cache  ·  concurrent reads safe",
+             Inches(VX+0.14), Inches(VY+0.38), Inches(VW-0.28), Inches(0.34),
              size=10, color=GREY, align=PP_ALIGN.CENTER)
 
-    add_box(s, Inches(SRC_X), Inches(SRC_Y), Inches(SRC_W), Inches(SRC_H),
-            fill=RGBColor(0x16,0x1b,0x22), line=GREY)
-    add_text(s, "Source Code\n./src  (12 languages)",
-             Inches(SRC_X+0.03), Inches(SRC_Y+0.06), Inches(SRC_W-0.06), Inches(SRC_H-0.12),
-             size=10, color=GREY, align=PP_ALIGN.CENTER)
+    # ── Angular connectors + sequence badges + data labels ────────────────────
 
-    # ── LLM "not used here" annotation ────────────────────────────────────────
-    add_box(s, Inches(LLM_X), Inches(LLM_Y), Inches(LLM_W), Inches(LLM_H),
-            fill=RGBColor(0x18,0x07,0x07), line=RED)
-    add_text(s, "⚡  Normally: LLM API calls",
-             Inches(LLM_X+0.08), Inches(LLM_Y+0.08), Inches(LLM_W-0.16), Inches(0.25),
-             size=9, bold=True, color=RED)
-    add_text(s,
-             "✗  Embedding API  (text-embedding-ada-002)\n"
-             "   → replaced by all-MiniLM-L6-v2\n"
-             "      runs locally, no API key, no cloud\n\n"
-             "✗  Answer generation  (GPT-4 / Claude API)\n"
-             "   → not needed: Copilot IS the LLM\n"
-             "      receives chunks, synthesises answer",
-             Inches(LLM_X+0.08), Inches(LLM_Y+0.38), Inches(LLM_W-0.16), Inches(LLM_H-0.50),
-             size=8, color=RED)
+    def alabel(slide, text, x, y, col=GREY):
+        add_text(slide, text, Inches(x), Inches(y), Inches(2.5), Inches(0.20),
+                 size=7, color=col, align=PP_ALIGN.CENTER)
 
-    # ── Angular (elbow) connectors + sequence badges ───────────────────────────
+    # ① test_mcp → mcp_server  (horizontal)
+    conn(s, T_r, T_cy, M_l, T_cy, GREEN, ctype=2)
+    seq_badge(s, 1, (T_r+M_l)/2, T_cy-0.28, GREEN)
+    alabel(s, "subprocess.run(mcp_server.py)  ·  JSON-RPC initialize",
+           (T_r+M_l)/2 - 1.25, T_cy - 0.46, GREEN)
 
-    # ① Copilot → Orchestrator  :  get_relevant_repos(query)  →  ["repo1","repo2"]
-    conn(s, COP_CX-0.8, COP_BOT, ORC_CX, ORC_Y, color=PURPLE, ctype=2)
-    seq_badge(s, 1, (COP_CX-0.8+ORC_CX)/2, (COP_BOT+ORC_Y)/2, color=PURPLE)
+    # ② mcp_server → docs (elbow down-left)
+    conn(s, M_cx-1.5, M_bot, D_cx, DY, GREY, ctype=2)
+    seq_badge(s, 2, (M_cx-1.5+D_cx)/2 - 0.1, (M_bot+DY)/2, GREY)
+    alabel(s, "reads .md files", (M_cx-1.5+D_cx)/2 - 1.25, (M_bot+DY)/2 - 0.22, GREY)
 
-    # ② Copilot → Repo Agents (×3)  :  query_repo(feature_request)  →  RELEVANT KNOWLEDGE
-    conn(s, COP_CX+0.5, COP_BOT, AGT_X+AGT_W/2, agent_cy[1], color=BLUE, ctype=2)
-    seq_badge(s, 2, (COP_CX+0.5+AGT_X+AGT_W/2)/2, (COP_BOT+agent_cy[1])/2, color=BLUE)
-    add_text(s, "×3", Inches((COP_CX+0.5+AGT_X+AGT_W/2)/2 + 0.14),
-             Inches((COP_BOT+agent_cy[1])/2 - 0.12), Inches(0.35), Inches(0.22),
-             size=8, bold=True, color=BLUE)
+    # ② mcp_server → src  (elbow down-right)
+    conn(s, M_cx+1.5, M_bot, S_cx, SY, GREY, ctype=2)
+    alabel(s, "reads source files", (M_cx+1.5+S_cx)/2 - 1.25, (M_bot+SY)/2 - 0.22, GREY)
 
-    # ③ Orchestrator → each Repo Agent  :  query_repo(q)  →  content length score
-    for cy in agent_cy:
-        conn(s, ORC_R, ORC_CY, AGT_X, cy, color=GREEN, ctype=2)
-    seq_badge(s, 3, (ORC_R+AGT_X)/2, (ORC_CY+agent_cy[1])/2, color=GREEN)
+    # ③ docs → chunker left  (elbow down-right)
+    conn(s, D_cx, D_bot, KX+0.6, KY, ORANGE, ctype=2)
+    seq_badge(s, 3, (D_cx+KX+0.6)/2 - 0.1, (D_bot+KY)/2, ORANGE)
+    alabel(s, "paragraph chunks", (D_cx+KX+0.6)/2 - 1.25, (D_bot+KY)/2 - 0.22, ORANGE)
 
-    # ④ Repo Agents → RAG Engine  :  query(feature_request)  →  chunks + L2 distances
-    for cy in agent_cy:
-        conn(s, AGT_R, cy, RAG_X, RAG_CY, color=BLUE, ctype=2)
-    seq_badge(s, 4, (AGT_R+RAG_X)/2, (agent_cy[1]+RAG_CY)/2, color=BLUE)
+    # ③ src → chunker right  (elbow down-left)
+    conn(s, S_cx, S_bot, KX+KW-0.6, KY, ORANGE, ctype=2)
+    alabel(s, "fn-boundary chunks", (S_cx+KX+KW-0.6)/2 - 1.25, (S_bot+KY)/2 - 0.22, ORANGE)
 
-    # ⑤ RAG → Embedding Model  :  text chunks (indexing) / query text (search)  →  384-dim vector
-    #    Both indexing and querying pass through Embedding before touching ChromaDB
-    conn(s, RAG_CX, RAG_BOT, RAG_CX, EMB_Y, color=ORANGE, ctype=2)
-    seq_badge(s, 5, RAG_CX, (RAG_BOT+EMB_Y)/2, color=ORANGE)
+    # ④ chunker → embedding  (straight down)
+    conn(s, K_cx, K_bot, E_cx, E_top, BLUE, ctype=1)
+    seq_badge(s, 4, K_cx+0.22, (K_bot+E_top)/2, BLUE)
+    alabel(s, "text chunks  (batch 512)", K_cx+0.38, (K_bot+E_top)/2 - 0.12, BLUE)
 
-    # ⑥ Embedding Model → ChromaDB  :  store vectors (index) / query vector (search)
-    #    Returns: top-k text chunks + L2 distances
-    conn(s, CHR_CX, EMB_BOT, CHR_CX, CHR_Y, color=BLUE, ctype=2)
-    seq_badge(s, 6, CHR_CX, (EMB_BOT+CHR_Y)/2, color=BLUE)
+    # ⑤ embedding → chromadb  (straight down)
+    conn(s, E_cx, E_bot, V_cx, V_top, GREEN, ctype=1)
+    seq_badge(s, 5, E_cx+0.22, (E_bot+V_top)/2, GREEN)
+    alabel(s, "384-dim float32[]  +  original text  +  ids", E_cx+0.38, (E_bot+V_top)/2 - 0.12, GREEN)
 
-    # ⑦ Docs + Source → Embedding  :  text chunks fed into pipeline at startup
-    #    Path: RAG reads files → chunks → send to Embedding → vectors → ChromaDB
-    conn(s, DOC_CX,  DOC_Y, RAG_CX-0.4, EMB_BOT, color=GREY, ctype=2)
-    conn(s, SRC_CX,  SRC_Y, RAG_CX+0.4, EMB_BOT, color=GREY, ctype=2)
-    seq_badge(s, 7, (DOC_CX+RAG_CX-0.4)/2, (DOC_Y+EMB_BOT)/2, color=GREY)
 
-    # ── Sequence legend (2-column footer) ─────────────────────────────────────
-    leg_left = [
-        (1, PURPLE, "get_relevant_repos(query_text)  →  [repo1, repo2]  (MCP/stdio, JSON-RPC 2.0)"),
-        (2, BLUE,   "query_repo(feature_request)  →  RELEVANT KNOWLEDGE:...  (MCP/stdio, ×3 calls)"),
-        (3, GREEN,  "route  →  query_repo on all repos  →  min(len/800, 1.0) score, return top-2"),
-        (4, BLUE,   "query(feature_request)  →  chunks + L2 distances  (internal RAG call)"),
+def slide_rag_query_flow(prs):
+    """Phase 2 — full test_mcp.py query flow: routing + per-repo RAG search."""
+    s = new_slide(prs)
+
+    add_text(s, "DATA FLOW — PHASE 2  ·  QUERY  (test_mcp.py)",
+             Inches(0.4), Inches(0.08), Inches(12.5), Inches(0.26),
+             size=10, bold=True, color=BLUE, align=PP_ALIGN.CENTER)
+    add_text(s, "Feature Request → Routing → Per-Repo RAG Search → Feature Analysis Document",
+             Inches(0.4), Inches(0.35), Inches(12.5), Inches(0.42),
+             size=19, bold=True, color=WHITE, align=PP_ALIGN.CENTER)
+    hline(s, Inches(0.83))
+
+    # ── Phase lane backgrounds ─────────────────────────────────────────────────
+    add_box(s, Inches(0.15), Inches(0.90), Inches(13.05), Inches(2.52),
+            fill=RGBColor(0x0d,0x14,0x0d), line=RGBColor(0x1a,0x30,0x1a))
+    add_text(s, "STEP 1 — ROUTING  (router_mcp_server.py queries each peer repo to score relevance)",
+             Inches(0.28), Inches(0.93), Inches(12.8), Inches(0.24),
+             size=9, bold=True, color=GREEN)
+
+    add_box(s, Inches(0.15), Inches(3.52), Inches(13.05), Inches(3.28),
+            fill=RGBColor(0x0d,0x14,0x1f), line=RGBColor(0x1a,0x28,0x44))
+    add_text(s, "STEP 2 — QUERY  (per-repo RAG: embed query → ChromaDB similarity search → top-k chunks)",
+             Inches(0.28), Inches(3.55), Inches(12.8), Inches(0.24),
+             size=9, bold=True, color=BLUE)
+
+    # ── ROUTING boxes ──────────────────────────────────────────────────────────
+    # test_mcp.py (routing)
+    add_box(s, Inches(0.28), Inches(1.22), Inches(2.10), Inches(0.85),
+            fill=RGBColor(0x0d,0x1f,0x0d), line=GREEN)
+    add_text(s, "test_mcp.py", Inches(0.38), Inches(1.30), Inches(1.90), Inches(0.36),
+             size=11, bold=True, color=GREEN, align=PP_ALIGN.CENTER)
+    add_text(s, "MCP client", Inches(0.38), Inches(1.66), Inches(1.90), Inches(0.22),
+             size=8, color=GREY, align=PP_ALIGN.CENTER)
+
+    # router_mcp_server.py
+    add_box(s, Inches(3.20), Inches(1.22), Inches(4.30), Inches(0.85),
+            fill=RGBColor(0x0d,0x1f,0x12), line=GREEN)
+    add_text(s, "router_mcp_server.py", Inches(3.30), Inches(1.30), Inches(4.10), Inches(0.30),
+             size=11, bold=True, color=GREEN, align=PP_ALIGN.CENTER)
+    add_text(s, "get_relevant_repos(requesting_repo, feature_description)",
+             Inches(3.30), Inches(1.62), Inches(4.10), Inches(0.22),
+             size=8, color=GREY, align=PP_ALIGN.CENTER)
+
+    # ephemeral mcp_server × peers
+    add_box(s, Inches(8.70), Inches(1.22), Inches(4.35), Inches(0.85),
+            fill=RGBColor(0x1a,0x14,0x05), line=ORANGE)
+    add_text(s, "mcp_server.py  × peers  (ephemeral)", Inches(8.80), Inches(1.30),
+             Inches(4.15), Inches(0.30), size=11, bold=True, color=ORANGE, align=PP_ALIGN.CENTER)
+    add_text(s, "subprocess.run()  ·  query_repo(feature_request)  ·  exits after call",
+             Inches(8.80), Inches(1.62), Inches(4.15), Inches(0.22),
+             size=8, color=GREY, align=PP_ALIGN.CENTER)
+
+    # score annotation
+    add_box(s, Inches(8.70), Inches(2.18), Inches(4.35), Inches(0.65),
+            fill=RGBColor(0x14,0x10,0x03), line=RGBColor(0x44,0x33,0x00))
+    add_text(s, "score = min(len(response) / 800,  1.0)\n"
+                "0.0 if '(no relevant knowledge found)'  ·  top-2 returned",
+             Inches(8.80), Inches(2.22), Inches(4.15), Inches(0.55),
+             size=8, color=ORANGE, align=PP_ALIGN.CENTER)
+
+    # top-2 result annotation (return path label)
+    add_box(s, Inches(3.20), Inches(2.18), Inches(4.30), Inches(0.65),
+            fill=RGBColor(0x03,0x12,0x07), line=RGBColor(0x1a,0x40,0x1a))
+    add_text(s, "③ returns: [repo-b, repo-c]  (top-2 by relevance score)\n"
+                "test_mcp.py notes selected repos for Step 2",
+             Inches(3.30), Inches(2.22), Inches(4.10), Inches(0.55),
+             size=8, color=GREEN, align=PP_ALIGN.CENTER)
+
+    # ── ROUTING connectors ─────────────────────────────────────────────────────
+    # ① test_mcp → router
+    conn(s, 2.38, 1.645, 3.20, 1.645, GREEN, ctype=2)
+    seq_badge(s, 1, 2.79, 1.38, GREEN)
+    add_text(s, "subprocess.run(router)  ·  tools/call get_relevant_repos",
+             Inches(2.00), Inches(1.18), Inches(1.90), Inches(0.22),
+             size=7, color=GREEN, align=PP_ALIGN.CENTER)
+
+    # ② router → ephemeral mcp_server
+    conn(s, 7.50, 1.645, 8.70, 1.645, ORANGE, ctype=2)
+    seq_badge(s, 2, 8.10, 1.38, ORANGE)
+    add_text(s, "subprocess.run(mcp_server) × R-1 peers",
+             Inches(7.00), Inches(1.18), Inches(2.20), Inches(0.22),
+             size=7, color=ORANGE, align=PP_ALIGN.CENTER)
+
+    # ── QUERY boxes ────────────────────────────────────────────────────────────
+    # test_mcp.py (query phase)
+    add_box(s, Inches(0.28), Inches(3.78), Inches(2.10), Inches(0.85),
+            fill=RGBColor(0x0d,0x1f,0x0d), line=GREEN)
+    add_text(s, "test_mcp.py", Inches(0.38), Inches(3.86), Inches(1.90), Inches(0.36),
+             size=11, bold=True, color=GREEN, align=PP_ALIGN.CENTER)
+    add_text(s, "_mcp_call() × 3 repos", Inches(0.38), Inches(4.22), Inches(1.90), Inches(0.22),
+             size=8, color=GREY, align=PP_ALIGN.CENTER)
+
+    # mcp_server.py × 3
+    add_box(s, Inches(3.20), Inches(3.78), Inches(3.10), Inches(0.85),
+            fill=RGBColor(0x0d,0x1f,0x35), line=BLUE)
+    add_text(s, "mcp_server.py  × 3", Inches(3.30), Inches(3.86), Inches(2.90), Inches(0.30),
+             size=11, bold=True, color=BLUE, align=PP_ALIGN.CENTER)
+    add_text(s, "rag.query(feature_request)  ·  ephemeral subprocess",
+             Inches(3.30), Inches(4.18), Inches(2.90), Inches(0.22),
+             size=8, color=GREY, align=PP_ALIGN.CENTER)
+
+    # Embedding Model (query embedding)
+    add_box(s, Inches(7.50), Inches(3.78), Inches(3.30), Inches(0.85),
+            fill=RGBColor(0x10,0x18,0x25), line=BLUE)
+    add_text(s, "Embedding Model", Inches(7.60), Inches(3.86), Inches(3.10), Inches(0.30),
+             size=11, bold=True, color=BLUE, align=PP_ALIGN.CENTER)
+    add_text(s, "_embed([feature_request])  →  384-dim query vector",
+             Inches(7.60), Inches(4.18), Inches(3.10), Inches(0.22),
+             size=8, color=GREY, align=PP_ALIGN.CENTER)
+
+    # ChromaDB (similarity search)
+    add_box(s, Inches(7.50), Inches(4.90), Inches(5.55), Inches(1.55),
+            fill=RGBColor(0x0d,0x1f,0x12), line=GREEN)
+    add_text(s, "ChromaDB  ·  .chroma_db/",
+             Inches(7.60), Inches(4.97), Inches(5.35), Inches(0.30),
+             size=12, bold=True, color=GREEN, align=PP_ALIGN.CENTER)
+    add_text(s, "docs_collection.query(query_embeddings, n_results=top_k)  →  top-k doc chunks + L2 distances\n"
+                "code_collection.query(query_embeddings, n_results=top_k)  →  top-k code chunks + L2 distances\n"
+                "keyword_search(question)  →  additional substring-matched chunks\n"
+                "similarity_threshold filter  →  drop chunks with L2 dist > threshold",
+             Inches(7.62), Inches(5.32), Inches(5.31), Inches(1.08),
+             size=9, color=GREY)
+
+    # RELEVANT KNOWLEDGE result box
+    add_box(s, Inches(3.20), Inches(5.25), Inches(3.80), Inches(0.85),
+            fill=RGBColor(0x1f,0x12,0x00), line=ORANGE)
+    add_text(s, "RELEVANT KNOWLEDGE:", Inches(3.30), Inches(5.32), Inches(3.60), Inches(0.28),
+             size=11, bold=True, color=ORANGE, align=PP_ALIGN.CENTER)
+    add_text(s, "[From documentation] ... + [From source code] ...\nbuffered in proc.stdout → returned to test_mcp.py",
+             Inches(3.30), Inches(5.62), Inches(3.60), Inches(0.42),
+             size=8, color=GREY, align=PP_ALIGN.CENTER)
+
+    # feature_analysis.md
+    add_box(s, Inches(0.28), Inches(5.25), Inches(2.10), Inches(0.85),
+            fill=RGBColor(0x1a,0x1a,0x0a), line=ORANGE)
+    add_text(s, "feature_analysis.md", Inches(0.38), Inches(5.33), Inches(1.90), Inches(0.32),
+             size=10, bold=True, color=ORANGE, align=PP_ALIGN.CENTER)
+    add_text(s, "routing scores + all repo knowledge + instructions for Copilot",
+             Inches(0.38), Inches(5.67), Inches(1.90), Inches(0.38),
+             size=7, color=GREY, align=PP_ALIGN.CENTER)
+
+    # ── QUERY connectors ───────────────────────────────────────────────────────
+    # ④ test_mcp → mcp_server
+    conn(s, 2.38, 4.205, 3.20, 4.205, BLUE, ctype=2)
+    seq_badge(s, 4, 2.79, 3.95, BLUE)
+    add_text(s, "subprocess.run(mcp_server)  ·  tools/call query_repo",
+             Inches(2.00), Inches(3.74), Inches(1.90), Inches(0.22),
+             size=7, color=BLUE, align=PP_ALIGN.CENTER)
+
+    # ⑤ mcp_server → embedding
+    conn(s, 6.30, 4.205, 7.50, 4.205, BLUE, ctype=2)
+    seq_badge(s, 5, 6.90, 3.95, BLUE)
+    add_text(s, "_embed([query])", Inches(6.20), Inches(3.74), Inches(1.90), Inches(0.22),
+             size=7, color=BLUE, align=PP_ALIGN.CENTER)
+
+    # ⑥ embedding → chromadb (straight down)
+    conn(s, 9.15, 4.63, 9.15, 4.90, GREEN, ctype=1)
+    seq_badge(s, 6, 9.38, 4.76, GREEN)
+    add_text(s, "query_vector", Inches(9.55), Inches(4.70), Inches(1.40), Inches(0.20),
+             size=7, color=GREEN)
+
+    # ⑦ chromadb → RELEVANT KNOWLEDGE (elbow left)
+    conn(s, 7.50, 5.675, 7.00, 5.675, ORANGE, ctype=2)
+    seq_badge(s, 7, 7.15, 5.42, ORANGE)
+    add_text(s, "top-k chunks + L2 dists", Inches(5.80), Inches(5.38), Inches(1.90), Inches(0.22),
+             size=7, color=ORANGE, align=PP_ALIGN.CENTER)
+
+    # RELEVANT KNOWLEDGE → test_mcp (horizontal left)
+    conn(s, 3.20, 5.675, 2.38, 5.675, ORANGE, ctype=2)
+    add_text(s, "RELEVANT KNOWLEDGE", Inches(2.00), Inches(5.38), Inches(1.90), Inches(0.22),
+             size=7, color=ORANGE, align=PP_ALIGN.CENTER)
+
+    # test_mcp → feature_analysis.md (straight down)
+    conn(s, 1.33, 4.63, 1.33, 5.25, ORANGE, ctype=1)
+    add_text(s, "writes", Inches(1.48), Inches(4.93), Inches(0.90), Inches(0.20),
+             size=7, color=ORANGE)
+
+
+def slide_vscode_flow(prs):
+    """VS Code session-based orchestration: 3 repos + 1 orchestrator."""
+    s = new_slide(prs)
+
+    add_text(s, "DATA FLOW — VS CODE SESSION  ·  3 REPOS + ORCHESTRATOR",
+             Inches(0.4), Inches(0.08), Inches(12.5), Inches(0.26),
+             size=10, bold=True, color=BLUE, align=PP_ALIGN.CENTER)
+    add_text(s, "Permanent MCP Servers  ·  Streaming stdio Pipes  ·  Ephemeral Routing Subprocesses",
+             Inches(0.4), Inches(0.35), Inches(12.5), Inches(0.42),
+             size=18, bold=True, color=WHITE, align=PP_ALIGN.CENTER)
+    hline(s, Inches(0.83))
+
+    # ── 4 VS Code window columns ───────────────────────────────────────────────
+    win_names  = ["VS Code\nrepo-a", "VS Code\nrepo-b", "VS Code\nrepo-c", "VS Code\norchestrator"]
+    win_colors = [BLUE, GREEN, PURPLE, ORANGE]
+    win_fills  = [RGBColor(0x0d,0x1f,0x35), RGBColor(0x0d,0x1f,0x12),
+                  RGBColor(0x2d,0x1f,0x47), RGBColor(0x22,0x14,0x00)]
+    col_x = [0.22, 3.40, 6.58, 9.76]   # left edge of each column
+    col_w = 2.95
+
+    server_labels = [
+        "router_mcp_server",
+        "repo-a/mcp_server",
+        "repo-b/mcp_server",
+        "repo-c/mcp_server",
     ]
-    leg_right = [
-        (5, ORANGE, "text chunks / query text  →  384-dim float[]  (RAG → Embedding Model)"),
-        (6, BLUE,   "vectors → store (index) / search (query)  →  top-k chunks + L2 dist  (ChromaDB)"),
-        (7, GREY,   "startup indexing: docs+src → chunk → Embedding → vectors → ChromaDB"),
+    srv_colors = [GREEN, BLUE, GREEN, PURPLE]
+
+    for ci, (wx, wname, wcol, wfill) in enumerate(zip(col_x, win_names, win_colors, win_fills)):
+        # VS Code window header box
+        add_box(s, Inches(wx), Inches(0.92), Inches(col_w), Inches(0.56),
+                fill=wfill, line=wcol)
+        add_text(s, wname, Inches(wx+0.08), Inches(0.95), Inches(col_w-0.16), Inches(0.50),
+                 size=11, bold=True, color=wcol, align=PP_ALIGN.CENTER)
+
+        # 4 permanent MCP server process boxes per window
+        for si, (slabel, scol) in enumerate(zip(server_labels, srv_colors)):
+            sy = 1.65 + si * 0.85
+            add_box(s, Inches(wx+0.08), Inches(sy), Inches(col_w-0.16), Inches(0.68),
+                    fill=RGBColor(0x12,0x17,0x1f), line=scol)
+            add_text(s, slabel, Inches(wx+0.16), Inches(sy+0.08), Inches(col_w-0.32), Inches(0.26),
+                     size=9, bold=True, color=scol, align=PP_ALIGN.CENTER)
+            add_text(s, "permanent · stdio pipe",
+                     Inches(wx+0.16), Inches(sy+0.36), Inches(col_w-0.32), Inches(0.22),
+                     size=7, color=GREY, align=PP_ALIGN.CENTER)
+
+    # Process count annotation
+    add_box(s, Inches(0.22), Inches(5.18), Inches(13.00), Inches(0.38),
+            fill=RGBColor(0x10,0x12,0x18), line=BORDER)
+    add_text(s, "4 windows  ×  4 servers each  =  16 permanent Python processes  "
+                "(+ ~8 VS Code/Electron procs per window = ~48 total OS processes)",
+             Inches(0.35), Inches(5.22), Inches(12.75), Inches(0.28),
+             size=9, bold=True, color=WHITE, align=PP_ALIGN.CENTER)
+
+    # ── Query flow section ─────────────────────────────────────────────────────
+    add_box(s, Inches(0.22), Inches(5.65), Inches(13.00), Inches(1.65),
+            fill=RGBColor(0x0a,0x12,0x0a), line=RGBColor(0x1a,0x30,0x1a))
+    add_text(s, "When Copilot in repo-a window types a feature request:",
+             Inches(0.35), Inches(5.68), Inches(12.75), Inches(0.24),
+             size=9, bold=True, color=GREEN)
+
+    # flow boxes in the bottom strip
+    flow = [
+        (0.35,  "Copilot\n(repo-a)", PURPLE, RGBColor(0x2d,0x1f,0x47)),
+        (2.20,  "router_mcp_server\n(permanent proc)", GREEN, RGBColor(0x0d,0x1f,0x12)),
+        (5.30,  "ephemeral\nmcp_server × peers", ORANGE, RGBColor(0x22,0x14,0x00)),
+        (8.30,  "repo-a\nmcp_server", BLUE, RGBColor(0x0d,0x1f,0x35)),
+        (10.40, "repo-b/c\nmcp_server", GREEN, RGBColor(0x0d,0x1f,0x12)),
     ]
-    row_h = Inches(0.185)
-    for i, (n, col, text) in enumerate(leg_left):
-        y = Inches(6.18) + i * row_h
-        add_box(s, Inches(0.25), y, Inches(0.22), Inches(0.155), fill=col, line=col)
-        add_text(s, f"{n}  {text}", Inches(0.52), y - Inches(0.01), Inches(6.0), Inches(0.18),
-                 size=7.5, color=GREY)
-    for i, (n, col, text) in enumerate(leg_right):
-        y = Inches(6.18) + i * row_h
-        add_box(s, Inches(6.8), y, Inches(0.22), Inches(0.155), fill=col, line=col)
-        add_text(s, f"{n}  {text}", Inches(7.07), y - Inches(0.01), Inches(6.0), Inches(0.18),
-                 size=7.5, color=GREY)
+    fh = 1.08
+    for fx, flabel, fcol, ffill in flow:
+        add_box(s, Inches(fx), Inches(5.98), Inches(1.70), Inches(fh),
+                fill=ffill, line=fcol)
+        add_text(s, flabel, Inches(fx+0.08), Inches(5.98+fh*0.18),
+                 Inches(1.54), Inches(fh*0.65),
+                 size=9, bold=True, color=fcol, align=PP_ALIGN.CENTER)
+
+    # flow arrows in the bottom strip
+    arrow_data = [
+        (2.05, 6.52, 2.20, 6.52, GREEN,  "①\nstdio pipe",   1.98, 5.82),
+        (4.10, 6.52, 5.30, 6.52, ORANGE, "② subprocess.run\n× peers (ephemeral)", 4.05, 5.82),
+        (7.10, 6.52, 8.30, 6.52, BLUE,   "③ top-2 repos\nselected",               7.15, 5.82),
+        (9.15, 6.52,10.40, 6.52, GREEN,  "④ query_repo\nstdio pipe",              9.10, 5.82),
+    ]
+    for ax1, ay1, ax2, ay2, acol, alb, ltx, lty in arrow_data:
+        conn(s, ax1, ay1, ax2, ay2, acol, ctype=2)
+        add_text(s, alb, Inches(ltx), Inches(lty), Inches(1.20), Inches(0.26),
+                 size=6.5, color=acol, align=PP_ALIGN.CENTER)
+
+    # ChromaDB access note
+    add_text(s, "Each permanent mcp_server holds open its repo's .chroma_db/ (SQLite WAL).  "
+                "Queries are concurrent reads — safe.  "
+                "Router uses ephemeral subprocesses; does NOT reuse the permanent server processes.",
+             Inches(0.35), Inches(7.12), Inches(12.75), Inches(0.30),
+             size=8, color=GREY, align=PP_ALIGN.CENTER)
 
 
 # ── Build presentation ────────────────────────────────────────────────────────
@@ -695,7 +913,9 @@ slide_tech_stack(prs)
 slide_workflow(prs)
 slide_rag(prs)
 slide_mcp(prs)
-slide_component_diagram(prs)
+slide_rag_init_flow(prs)
+slide_rag_query_flow(prs)
+slide_vscode_flow(prs)
 slide_setup(prs)
 slide_demo(prs)
 
