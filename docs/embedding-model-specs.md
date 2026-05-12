@@ -43,8 +43,9 @@ Measured from `config.json` in the model snapshot:
 | Vocabulary size | 30,522 |
 | **Output embedding dimension** | **384** |
 
-The 384-dimensional output is what gets stored in ChromaDB. Each indexed
-chunk becomes a vector of 384 float32 values (~1.5 KB per chunk in the DB).
+The 384-dimensional output is what gets stored in ChromaDB alongside the
+original text. Each indexed chunk becomes a vector of 384 float32 values
+(~1.5 KB per chunk in the DB).
 
 ---
 
@@ -111,3 +112,68 @@ The closest solutions and their trade-offs:
 The fundamental reason: ChromaDB solved a solved problem (database caching).
 Embedding model instantiation speed is still an active area in the ML
 infrastructure ecosystem.
+
+---
+
+## The model is strictly one-way — it does not decode vectors back to text
+
+`all-MiniLM-L6-v2` is an **encoder-only** model. It has one direction:
+
+```
+text  ──►  384-dim vector       ✓  (what the model does)
+vector ──►  text                ✗  (impossible — encoder-only, no decoder)
+```
+
+There is no inverse operation. Compressing a text chunk into 384 floats is
+lossy — the information needed to reconstruct the original text is
+discarded. No embedding model can reverse this.
+
+### What actually comes back from ChromaDB
+
+ChromaDB stores **two things** per chunk at index time — the vector AND the
+original text (`repo_rag.py:157`):
+
+```python
+collection.add(
+    documents=docs[...],        # original text chunks stored as-is
+    embeddings=embeddings[...], # vectors stored alongside
+    ids=ids[...],
+)
+```
+
+At query time, ChromaDB uses the vectors only for similarity search (nearest
+neighbour by L2 distance). What it returns is the **original stored text**,
+not the vectors (`repo_rag.py:313`):
+
+```python
+doc_res = self._docs_collection.query(
+    query_embeddings=q_emb,
+    n_results=self.top_k,
+    include=["documents", "distances"]  # "documents" = original text strings
+)
+doc_snip = doc_res["documents"][0]      # raw text chunks stored at index time
+```
+
+The embedding model is never involved in the return path.
+
+### Full round-trip
+
+```
+INDEXING
+  text chunk ──► all-MiniLM-L6-v2 ──► 384-dim vector
+                                            │
+                                ChromaDB stores both text + vector
+
+QUERYING
+  query string ──► all-MiniLM-L6-v2 ──► query vector
+                                              │
+                                    ChromaDB: find top-k nearest vectors
+                                    (pure L2 distance maths, no model involved)
+                                              │
+                                    returns original stored text chunks
+```
+
+The embedding model is called exactly **twice** per query — once to embed
+the query string. Everything after that is vector arithmetic inside ChromaDB.
+The original text is what flows back up to the MCP tool result and ultimately
+to Copilot.
