@@ -191,3 +191,126 @@ The HTML log file receives the same treatment.
 | Embedding model | Each process loads its own copy | No gap — but costs ~90 MB RAM per process (1.4 GB total across 16 processes) |
 
 **Practical recommendation:** if multiple developers will open all repos simultaneously for the first time, run `python mcp/mcp_server.py` manually in each repo once to pre-build the index before opening VS Code. After that, all 16 processes operate read-only against ChromaDB and concurrency is fully safe.
+
+---
+
+## Part 3 — Process Limits and What Happens When They Are Exceeded
+
+### OS process limits (macOS)
+
+Every OS enforces a hard ceiling on the number of processes that can exist simultaneously:
+
+| Limit | Value (this machine) | Scope |
+|---|---|---|
+| `kern.maxproc` | 8,000 | System-wide, all users combined |
+| `kern.maxprocperuid` | 5,333 | Per user — you hit this first |
+| Processes currently running | ~690 | Across all users at time of check |
+
+### The quadratic growth problem
+
+Because every VS Code window spawns **all** servers (not just its own), process count grows as **(R+1)²** where R = number of repos:
+
+| Repos | Windows | Servers per window | Permanent Python procs | VS Code procs (≈26 each) | Total OS processes |
+|---|---|---|---|---|---|
+| 3 | 4 | 4 | 16 | 104 | ~120 |
+| 5 | 6 | 6 | 36 | 156 | ~192 |
+| 10 | 11 | 11 | 121 | 286 | ~407 |
+| 20 | 21 | 21 | 441 | 546 | ~987 |
+| ~65 | 66 | 66 | ~4,356 | ~1,716 | ≈5,333 — per-user limit |
+
+With browser, Slack, terminal, and other apps consuming processes, the real practical ceiling is closer to **30–40 repos** before things start failing.
+
+### What happens when the limit is hit
+
+There are two spawn sites in the framework, and they fail differently:
+
+**VS Code spawning permanent MCP servers (startup)**
+
+VS Code calls Node.js `child_process.spawn()`, which calls the kernel `fork()`. If `fork()` returns `EAGAIN` (process table full), VS Code shows an error in its MCP/Output panel — something like "MCP server failed to start". That server's tool becomes unavailable to Copilot. The window still works for regular editing.
+
+**Orchestrator's ephemeral `subprocess.run()` calls (`router.py:32`)**
+
+```python
+try:
+    proc = subprocess.run([python, server_script], ...)
+except subprocess.TimeoutExpired:
+    return "(MCP timeout)"
+except Exception as e:
+    return f"(MCP error: {e})"   # ← OSError: [Errno 11] EAGAIN lands here
+```
+
+The `except Exception` catches the `OSError` from `fork()` failing and returns `"(MCP error: [Errno 11] Resource temporarily unavailable)"`. The scorer in `_score_response()` sees `"(mcp"` in the string and returns `0.0`. That repo is silently excluded from routing — **the system degrades without any visible error to the user**.
+
+### RAM hits the ceiling before process count does
+
+Each `mcp_server.py` loads `all-MiniLM-L6-v2` (~90 MB) independently — no sharing across processes:
+
+| Repos | Permanent Python procs | Embedding model RAM |
+|---|---|---|
+| 10 | 121 | ~10.9 GB |
+| 20 | 441 | ~39.7 GB |
+
+A 16 GB machine starts swap-thrashing well before hitting the process limit.
+
+### Architectural fix: linear instead of quadratic
+
+The root cause is that `setup.py` writes the same `mcp.json` (all servers) to every repo. Each window only needs **its own server + the orchestrator** — the orchestrator already reaches peer servers directly via `subprocess.run()` when routing.
+
+Changing `setup.py` to write a repo-specific `mcp.json` per window reduces permanent processes from **(R+1)²** to **2(R+1)**:
+
+```
+Current:   repo-a window lists orchestrator + repo-a + repo-b + repo-c   (4 servers)
+Fixed:     repo-a window lists orchestrator + repo-a only                 (2 servers)
+```
+
+This halves RAM consumption and makes scaling linear.
+
+---
+
+## Part 4 — How Child Process Output Is Received
+
+### VS Code receiving output from permanent MCP servers
+
+VS Code holds the stdout pipe **open for the lifetime of the process** and reads in a streaming, event-driven manner. As soon as `FastMCP` writes a JSON-RPC response line to `sys.stdout` and flushes, VS Code's pipe handle receives it. Our server side:
+
+```python
+# mcp_server.py:99
+mcp.run(transport="stdio")   # FastMCP writes responses to sys.stdout and flushes
+```
+
+VS Code's MCP client layer parses each newline-delimited JSON object off the pipe and matches it to the pending request by `id`. Neither side polls — the OS pipe buffer handles flow control.
+
+**Model: streaming, pipe stays open, one response per tool call.**
+
+### Orchestrator receiving output from ephemeral subprocesses
+
+`subprocess.run(..., capture_output=True)` at `router.py:32` **buffers all stdout in memory** and only returns after the child process exits. Then `_mcp_call()` scans the buffer line by line for the message with `id=2`:
+
+```python
+# router.py:41-52
+for line in proc.stdout.splitlines():   # iterate over fully-buffered stdout
+    line = line.strip()
+    if not line:
+        continue
+    try:
+        msg = json.loads(line)
+        if msg.get("id") == 2:          # find the tools/call response
+            content = msg.get("result", {}).get("content", [])
+            if content:
+                return content[0].get("text", "(empty response)")
+    except json.JSONDecodeError:
+        continue
+return "(no response)"
+```
+
+**Model: buffered, waits for process exit, then scans all stdout at once.**
+
+### Comparison
+
+| | VS Code ← permanent server | Orchestrator ← ephemeral server |
+|---|---|---|
+| Read model | Streaming — reads lines as they arrive | Buffered — reads everything after child exits |
+| When data available | As soon as server writes each line | Only after child process terminates |
+| Mechanism | OS pipe + Node.js event loop | `subprocess.run(capture_output=True)` → `proc.stdout` string |
+| Finds response by | JSON-RPC `id` matching via FastMCP client internals | Manual scan of `proc.stdout.splitlines()` for `id == 2` |
+| Implication | Low latency per tool call | Orchestrator blocks for full RAG query duration — hence 600 s default timeout on first run |
