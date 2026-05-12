@@ -564,6 +564,14 @@ def slide_rag_init_flow(prs):
              Inches(KX+0.14), Inches(KY+0.44), Inches(KW-0.28), Inches(0.50),
              size=10, color=GREY, align=PP_ALIGN.CENTER)
 
+    # ── Model load annotation — sits between Chunker and Embedding Model ────────
+    add_box(s, Inches(EX), Inches(4.63), Inches(EW), Inches(0.30),
+            fill=RGBColor(0x0d,0x18,0x2a), line=BLUE)
+    add_text(s, "LOAD  SentenceTransformer('all-MiniLM-L6-v2')  ·  ~5-15 s  ·  ~300 MB RAM  "
+                "·  paid once at mcp_server process start, before any encoding",
+             Inches(EX+0.10), Inches(4.65), Inches(EW-0.20), Inches(0.22),
+             size=8, color=BLUE, align=PP_ALIGN.CENTER)
+
     add_box(s, Inches(EX), Inches(EY), Inches(EW), Inches(EH),
             fill=RGBColor(0x10,0x18,0x25), line=BLUE)
     add_text(s, "Embedding Model  ·  all-MiniLM-L6-v2  ·  local  ·  offline",
@@ -693,6 +701,14 @@ def slide_rag_query_flow(prs):
              Inches(3.30), Inches(2.22), Inches(4.10), Inches(0.55),
              size=8, color=GREEN, align=PP_ALIGN.CENTER)
 
+    # Model load note for ephemeral routing subprocesses
+    add_box(s, Inches(8.70), Inches(2.92), Inches(4.35), Inches(0.42),
+            fill=RGBColor(0x0d,0x14,0x22), line=BLUE)
+    add_text(s, "model loaded fresh per subprocess call  ·  ~5-15 s each  ·  ~300 MB RAM each\n"
+                "8 calls for 3 repos → ~40-120 s model-load overhead on cold start",
+             Inches(8.80), Inches(2.94), Inches(4.15), Inches(0.36),
+             size=7.5, color=BLUE, align=PP_ALIGN.CENTER)
+
     # ── ROUTING connectors ─────────────────────────────────────────────────────
     # ① test_mcp → router
     conn(s, 2.38, 1.645, 3.20, 1.645, GREEN, ctype=2)
@@ -766,6 +782,14 @@ def slide_rag_query_flow(prs):
              Inches(0.38), Inches(5.67), Inches(1.90), Inches(0.38),
              size=7, color=GREY, align=PP_ALIGN.CENTER)
 
+    # Model load annotation in query lane — between mcp_server × 3 (bottom 4.63) and ChromaDB (top 4.90)
+    add_box(s, Inches(0.28), Inches(4.66), Inches(7.10), Inches(0.21),
+            fill=RGBColor(0x0d,0x14,0x22), line=BLUE)
+    add_text(s, "each ephemeral mcp_server subprocess loads all-MiniLM-L6-v2 fresh  "
+                "·  ~5-15 s per subprocess  ·  ~300 MB RAM per process",
+             Inches(0.38), Inches(4.67), Inches(6.90), Inches(0.17),
+             size=7, color=BLUE, align=PP_ALIGN.CENTER)
+
     # ── QUERY connectors ───────────────────────────────────────────────────────
     # ④ test_mcp → mcp_server
     conn(s, 2.38, 4.205, 3.20, 4.205, BLUE, ctype=2)
@@ -810,7 +834,8 @@ def slide_vscode_flow(prs):
     add_text(s, "DATA FLOW — VS CODE SESSION  ·  3 REPOS + ORCHESTRATOR",
              Inches(0.4), Inches(0.08), Inches(12.5), Inches(0.26),
              size=10, bold=True, color=BLUE, align=PP_ALIGN.CENTER)
-    add_text(s, "Permanent MCP Servers  ·  Streaming stdio Pipes  ·  Ephemeral Routing Subprocesses",
+    add_text(s, "VS Code spawns 4 permanent servers per window  ·  "
+                "router spawns ephemeral peer subprocesses only during routing calls",
              Inches(0.4), Inches(0.35), Inches(12.5), Inches(0.42),
              size=18, bold=True, color=WHITE, align=PP_ALIGN.CENTER)
     hline(s, Inches(0.83))
@@ -845,9 +870,17 @@ def slide_vscode_flow(prs):
                     fill=RGBColor(0x12,0x17,0x1f), line=scol)
             add_text(s, slabel, Inches(wx+0.16), Inches(sy+0.08), Inches(col_w-0.32), Inches(0.26),
                      size=9, bold=True, color=scol, align=PP_ALIGN.CENTER)
-            add_text(s, "permanent · stdio pipe",
+            add_text(s, "permanent · model loaded once at startup",
                      Inches(wx+0.16), Inches(sy+0.36), Inches(col_w-0.32), Inches(0.22),
                      size=7, color=GREY, align=PP_ALIGN.CENTER)
+
+    # RAM annotation (model load cost per permanent process)
+    add_box(s, Inches(0.22), Inches(4.97), Inches(13.00), Inches(0.17),
+            fill=RGBColor(0x0d,0x14,0x22), line=BLUE)
+    add_text(s, "all-MiniLM-L6-v2 loaded ONCE at VS Code startup per process  "
+                "·  model stays in RAM for ALL Copilot queries  ·  16 procs × ~300 MB ≈ 4.8 GB total",
+             Inches(0.35), Inches(4.98), Inches(12.75), Inches(0.14),
+             size=7, color=BLUE, align=PP_ALIGN.CENTER)
 
     # Process count annotation
     add_box(s, Inches(0.22), Inches(5.18), Inches(13.00), Inches(0.38),
