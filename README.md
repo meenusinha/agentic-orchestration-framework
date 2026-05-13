@@ -33,6 +33,97 @@ Developer → feature request in VS Code Copilot (Agent mode)
 
 ---
 
+## Try it now — no VS Code needed
+
+`test_mcp.py` runs the full agent flow from the command line. No Copilot, no IDE.
+One command drives all three phases — preflight, routing, per-repo RAG — and writes
+a ready-to-use Feature Analysis Document.
+
+### What it does
+
+```
+python test_mcp.py "your feature request"
+         │
+         ├── Phase 0 · Preflight
+         │      Pings each repo's MCP server to confirm it responds.
+         │
+         ├── Phase 1 · Routing
+         │      Spawns each peer repo's MCP server as a subprocess.
+         │      Each returns relevant knowledge. Router scores by content length.
+         │      Top-2 most relevant repos are selected.
+         │
+         └── Phase 2 · Query all repos
+                Queries own repo + all peer repos for the full knowledge set.
+                Writes everything to feature_analysis.md.
+```
+
+### Run it (two terminals)
+
+**Terminal 1 — watch live:**
+```bash
+tail -f /tmp/mcp-orchestration.log
+```
+
+**Terminal 2 — run the flow:**
+```bash
+source .venv/bin/activate
+python test_mcp.py "add real-time validation feedback to the login form"
+```
+
+### What you see
+
+```
+[12:34:01.120] [frontend    ] [INDEX    ] Index already cached — loading from .chroma_db/
+[12:34:01.140] [backend     ] [INDEX    ] Index already cached — loading from .chroma_db/
+
+[12:34:01.160] [orchestrator] [ROUTING  ] Routing: 'add real-time validation feedback...'
+[12:34:01.165] [orchestrator] [ROUTING  ]   Calling Backend MCP → query_repo...
+[12:34:01.420] [backend     ] [RAG      ] Searching docs (top_k=3)...
+[12:34:01.480] [backend     ] [RESULT   ] query_repo → 640 chars returned
+[12:34:01.481] [orchestrator] [ROUTING  ]   backend: relevance=0.800
+[12:34:01.485] [orchestrator] [ROUTING  ]   Calling Payments Service MCP → query_repo...
+[12:34:01.700] [payments    ] [RAG      ] Docs thin — searching source code...
+[12:34:01.760] [payments    ] [RESULT   ] query_repo → 92 chars returned
+[12:34:01.761] [orchestrator] [ROUTING  ]   payments: relevance=0.115
+[12:34:01.763] [orchestrator] [RESULT   ] Selected: ['backend', 'payments']
+
+[12:34:01.780] [frontend    ] [RAG      ] Searching docs (top_k=3) + source code (top_k=3)...
+[12:34:01.940] [backend     ] [RAG      ] Searching docs (top_k=3) + source code (top_k=3)...
+[12:34:02.110] [payments    ] [RAG      ] Searching docs (top_k=3) + source code (top_k=3)...
+
+✅  feature_analysis.md written
+```
+
+### What you get
+
+`feature_analysis.md` in the working directory — a cross-repo Feature Analysis Document
+with routing scores, relevant knowledge from every repo, and instructions for Copilot
+to generate a Solution Design. Paste it straight into Copilot Chat.
+
+```markdown
+# Feature Analysis: add real-time validation feedback to the login form
+
+## Routing
+Selected repos (by RAG relevance): backend (0.800), payments (0.115)
+
+## frontend — own repo
+[From documentation]
+AuthModule handles login, JWT refresh, and session persistence...
+
+## backend — peer repo
+[From documentation]
+Validation middleware applies to all /api/auth endpoints...
+
+## Solution Design Instructions
+Based on the above cross-repo knowledge, implement ...
+```
+
+> **First run is slower** — each MCP server builds its RAG index on the first call
+> (~10-60 s per repo depending on size). Subsequent runs load the cached index from
+> `.chroma_db/` in milliseconds.
+
+---
+
 ## Prerequisites
 
 | Requirement | Version |
