@@ -66,6 +66,11 @@ for repo in repos_cfg:
     })
 
 orchestrator_script    = str(ORCHESTRATOR_DIR / "mcp" / "router_mcp_server.py")
+# Pin the interpreter that ran setup.py (the framework venv). A bare "python" is
+# resolved by the editor's environment: a VS Code that was already running when
+# the venv was activated starts the servers with the wrong Python and they fail
+# with ModuleNotFoundError.
+PYTHON = sys.executable
 orchestrator_pythonpath = str(ORCHESTRATOR_DIR / "mcp")
 
 
@@ -75,7 +80,7 @@ def _all_servers() -> dict:
     servers = {
         "orchestrator_router": {
             "type": "stdio",
-            "command": "python",
+            "command": PYTHON,
             "args": [orchestrator_script],
             "env": {
                 "PYTHONPATH": orchestrator_pythonpath,
@@ -87,7 +92,7 @@ def _all_servers() -> dict:
     for r in resolved:
         servers[r["name"]] = {
             "type": "stdio",
-            "command": "python",
+            "command": PYTHON,
             "args": [str(r["path"] / "mcp" / "mcp_server.py")],
             "env": {
                 "PYTHONPATH": str(r["path"] / "mcp"),
@@ -226,7 +231,7 @@ print(f"""
 Setup complete.
 
 Next:
-  1. Activate the venv, then open each repo in VS Code from that terminal
+  1. Open each repo in VS Code (reload windows that are already open)
   2. Switch Copilot chat to Agent mode
   3. Type a feature request
   4. Watch the live log:

@@ -356,16 +356,11 @@ This generates two files per repo:
 
 ### Step 6 — Open each repo in VS Code
 
-You must launch VS Code **from the terminal where your venv is active** — VS Code
-inherits the Python from that terminal, and all MCP servers run with it.
+The generated `.vscode/mcp.json` runs every MCP server with the venv's Python (the
+one that ran `setup.py`), so VS Code can be opened however you like, even if it is
+already running.
 
 ```bash
-# Make sure the venv is active first
-source /path/to/agentic-orchestration/.venv/bin/activate   # Mac / Linux
-# or
-/path/to/agentic-orchestration/.venv/Scripts/activate       # Windows
-
-# Then open each repo
 code /path/to/frontend
 code /path/to/backend
 code /path/to/payments
@@ -374,8 +369,13 @@ code /path/to/payments
 VS Code automatically loads `.vscode/mcp.json` from the workspace folder.
 All MCP servers (orchestrator + all repos) start automatically and stay running.
 
-> **Do not open VS Code from Finder or the Dock** — it won't inherit the venv and
-> the MCP servers will fail with `ModuleNotFoundError`.
+> **Run `setup.py` from the activated venv.** The generated configs pin that venv's
+> Python, so VS Code itself can be opened any way you like (terminal, Finder, Dock).
+> If a server fails with `ModuleNotFoundError`, re-run `setup.py` from the venv.
+
+> **After re-running `setup.py`**, VS Code stops the changed servers but does not
+> restart them. Reload the window (`Cmd+Shift+P` → Reload Window) or restart them
+> from the MCP Servers view.
 
 > **First-time MCP activation**: VS Code may show a notification asking you to allow
 > the MCP servers. Click **Allow** for each one.
@@ -480,7 +480,8 @@ agentic-orchestration-framework/        ← this repo (cloned once)
 | MCP servers not appearing in Copilot | Reload VS Code window (`Cmd+Shift+P` → Reload Window) |
 | `ModuleNotFoundError: yaml` | Run `pip install pyyaml` in your venv |
 | `ModuleNotFoundError: chromadb` | Run `pip install -r requirements.txt` in your venv |
-| VS Code launched from wrong terminal (wrong Python) | Run `source .venv/bin/activate` then `code .` from that same terminal |
+| `ModuleNotFoundError: mcp` in the MCP server log (wrong Python) | Re-run `setup.py` with the venv activated; the configs pin the Python that ran it |
+| MCP servers stopped after re-running `setup.py` | Reload the VS Code window, or restart them from the MCP Servers view |
 | RAG returns nothing | Check that `knowledge/` has `.md` files; delete `.chroma_db/` to re-index |
 | `OSError: No such file or directory: '.../all-MiniLM-L6-v2'` | Model files missing — copy `models/all-MiniLM-L6-v2/` into the repo root |
 | `path does not exist` warning in setup.py | The path in `orchestrator/mcp/config.yaml` is wrong or the repo isn't cloned yet |

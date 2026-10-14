@@ -65,7 +65,10 @@ The MCP server, RAG engine, and copilot instructions all read from it. No code c
 It must be re-run whenever repos are added/removed.
 
 **Absolute paths in mcp.json**: Generated mcp.json files use absolute paths so VS Code
-can be opened from any terminal without setting env vars. This was a deliberate choice
+can be opened from any terminal without setting env vars. The server `command` is
+`sys.executable` (the venv Python that ran setup.py), not a bare `python`. A bare
+`python` resolved to the wrong interpreter whenever VS Code was already running,
+and every server failed with `ModuleNotFoundError: mcp`. This was a deliberate choice
 over the env-var approach used in the earlier lithography demo.
 
 **No cross-repo Python imports**: Each repo's `mcp/` directory is fully self-contained.
