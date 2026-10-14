@@ -1,6 +1,6 @@
 ---
 name: cross-repo-feature-analysis
-description: Analyse a feature request across multiple related repositories using the agentic-orchestration-framework MCP servers (an `orchestrator_router` server with `get_relevant_repos`, and one server per repo with `query_repo`). Use when the developer asks how to build, change, or assess the impact of a feature that may touch other services or repos (frontend/backend/shared libraries/microservices), asks "which repos are affected", or wants a cross-repo design or Feature Analysis Document. Requires those MCP servers to be configured; if they are not, explain the setup instead.
+description: Analyse a feature request across multiple related repositories using the agentic-orchestration-framework MCP servers (an `orchestrator_router` server with `get_relevant_repos`, and one server per repo with `query_repo`). Use when the developer asks how to build, change, or assess the impact of a feature that may touch other services or repos (frontend/backend/shared libraries/microservices), asks "which repos are affected", or wants a cross-repo design or Feature Analysis Document. Also use when the developer wants to set up cross-repo analysis, connect or add repos, or change which docs and code each repo indexes. If the MCP servers are not configured yet, this skill walks through configuring them.
 license: MIT
 ---
 
@@ -25,9 +25,16 @@ name and tool name.
 ## Before you start
 
 1. **Check the tools are available.** Look for a `get_relevant_repos` tool from a
-   server called `orchestrator_router`. If it is missing, stop. Tell the developer the
-   MCP servers are not connected and point them to
-   [references/setup.md](references/setup.md). Do not run the flow from memory.
+   server called `orchestrator_router`. If it is missing, do not run the analysis from
+   memory. Instead:
+   - If the workspace root has a `.mcp.json` (or `.cursor/mcp.json`) that lists
+     `orchestrator_router`, the setup has been done but the servers aren't loaded. Ask
+     the developer to restart the agent and approve the project MCP servers. In Claude
+     Code, `/mcp` shows their status.
+   - Otherwise, offer to run the first-time setup in
+     [references/setup.md](references/setup.md) and follow it if they agree. It asks
+     which repos to connect, scans each one and agrees with the developer on which
+     docs and code to index, then installs and configures everything.
 2. **Find out which repo you are in.** Read `mcp/config.yaml` at the workspace root.
    Its `repo_name` value is this repo's id and the name of its MCP server. If the file
    is missing, ask the developer which configured repo this is.
@@ -111,6 +118,10 @@ Build the document only from what the tools returned:
 - **Coordination**: order of rollout and backward-compatibility concerns
 - **Risks and open questions**: gaps where a repo returned no knowledge
 ```
+
+If retrieval keeps coming back thin or noisy for a repo, suggest reviewing what that
+repo indexes. The "Change what a repo indexes" step in
+[references/setup.md](references/setup.md) covers how.
 
 ## Rules
 

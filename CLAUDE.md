@@ -68,6 +68,12 @@ The MCP server, RAG engine, and copilot instructions all read from it. No code c
   which is generic — it reads `repo_name` from the repo's `mcp/config.yaml` at runtime)
 It must be re-run whenever repos are added/removed.
 
+**Skill scripts** (`skills/cross-repo-feature-analysis/scripts/`): `scan.py` is read-only
+and proposes per-repo `src_path` / `knowledge_path` / `extra_extensions`. Its
+`INDEXED_EXT` must stay in sync with `_DEFAULT_EXTENSIONS` in `repo_rag.py`.
+`configure.py` writes the orchestrator and per-repo configs from flags, clears a repo's
+`.chroma_db/` when its indexing settings change, then runs `setup.py`.
+
 **Absolute paths in mcp.json**: Generated mcp.json files use absolute paths so VS Code
 can be opened from any terminal without setting env vars. The server `command` is
 `sys.executable` (the venv Python that ran setup.py), not a bare `python`. A bare

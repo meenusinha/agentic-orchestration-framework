@@ -427,8 +427,14 @@ The flow is also packaged as a portable [Agent Skill](https://agentskills.io):
 It tells the agent when to use the MCP servers and how: route first, query its own
 repo, query the selected peers, then write the Feature Analysis Document.
 
-After steps 1–4, run `python orchestrator/setup.py` from the activated venv. Besides
-the VS Code files, it writes these into every repo:
+**Guided setup:** install only the skill and ask your agent something like *"set up
+cross-repo analysis for ../frontend and ../backend"*. The agent clones the framework,
+uses `scripts/scan.py` to propose which docs and code each repo should index, agrees
+that plan with you, then runs `scripts/configure.py`, which does steps 2–5 in one go.
+It can also draft starter `knowledge/` docs for repos that don't have any.
+
+**Manual setup:** after steps 1–4, run `python orchestrator/setup.py` from the
+activated venv. Besides the VS Code files, it writes these into every repo:
 
 | Client | Generated |
 |---|---|
@@ -485,6 +491,9 @@ agentic-orchestration-framework/        ← this repo (cloned once)
 │
 ├── skills/
 │   └── cross-repo-feature-analysis/     ← Agent Skill (installed into repos by setup.py)
+│       ├── SKILL.md                     ← when/how the agent uses the MCP servers
+│       ├── references/setup.md          ← guided first-time setup the agent follows
+│       └── scripts/                     ← scan.py (what to index), configure.py (wire repos)
 │
 └── repo-agent/                          ← copy contents into each of your repos
     ├── mcp/

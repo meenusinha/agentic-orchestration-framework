@@ -1,72 +1,175 @@
-# Setting up the MCP servers
+# First-time setup
 
-The skill needs the MCP servers from
-[agentic-orchestration-framework](https://github.com/meenusinha/agentic-orchestration-framework).
-Here is a short version of the setup. The project README has the full guide.
+Follow this procedure when the MCP servers are not connected and the developer has
+agreed to set them up. Run the commands yourself. Before any step that downloads
+something or writes into a repo, say what it will do and get the developer's
+go-ahead. You can confirm several steps at once.
 
-## 1. Get the framework and the embedding model
+The commands below are for macOS and Linux. On Windows, the venv Python is
+`.venv\Scripts\python.exe` instead of `.venv/bin/python`.
 
-```bash
-git clone https://github.com/meenusinha/agentic-orchestration-framework.git agentic-orchestration
-cd agentic-orchestration
-python3 -m venv .venv && source .venv/bin/activate
-pip install -r requirements.txt
-huggingface-cli download sentence-transformers/all-MiniLM-L6-v2 --local-dir models/all-MiniLM-L6-v2
-```
+## 1. Ask which repos to connect
 
-## 2. List your repos
+Ask the developer for the repos that should know about each other. You need at least
+two. Make it easy for them:
 
-Edit `orchestrator/mcp/config.yaml`:
+- Suggest the current repo, plus any sibling folders next to it that are git repos
+  (`ls ..`, then look for a `.git` folder in each).
+- Each repo gets a short id. By default it's the folder name, lower-cased (for example
+  `payments-service`). Only ask about ids if two folders would end up with the same id.
 
-```yaml
-repos:
-  - name: frontend
-    display_name: Frontend
-    path: /abs/path/to/frontend
-  - name: backend
-    display_name: Backend
-    path: /abs/path/to/backend
-log_file: /tmp/mcp-orchestration.log
-```
+## 2. Find or install the framework
 
-## 3. Add the agent files to each repo
+Check for an existing install, in this order:
 
-```bash
-cp -r repo-agent/mcp/       /abs/path/to/frontend/mcp/
-cp -r repo-agent/knowledge/ /abs/path/to/frontend/knowledge/
-```
+1. The `orchestrator_router` entry in any `.mcp.json`. Its `args` path is
+   `<framework>/orchestrator/mcp/router_mcp_server.py`.
+2. `~/agentic-orchestration`.
+3. Ask the developer whether they have a clone somewhere else.
 
-In each repo, set `repo_name` in `mcp/config.yaml` to match the `name` in step 2, and
-set `src_path`. Then put architecture and interface `.md` docs into `knowledge/`.
-
-## 4. Generate the client config
-
-From the venv:
+If there's no install, clone one and install it. This needs Python 3.11+, and the
+`pip install` step takes a few minutes the first time:
 
 ```bash
-python orchestrator/setup.py
+git clone https://github.com/meenusinha/agentic-orchestration-framework.git ~/agentic-orchestration
+python3 -m venv ~/agentic-orchestration/.venv
+~/agentic-orchestration/.venv/bin/pip install -r ~/agentic-orchestration/requirements.txt
 ```
 
-It writes these files into every repo:
+## 3. Decide what to index in each repo
 
-| Client | Files |
+The analysis is only as good as what each repo's search index contains, so agree on
+this with the developer before configuring anything. Run the read-only scanner with
+the framework venv's Python:
+
+```bash
+~/agentic-orchestration/.venv/bin/python <this-skill>/scripts/scan.py \
+    /abs/path/to/frontend backend=/abs/path/to/api
+```
+
+For each repo it lists doc folders, source folders, test folders, file types the index
+skips by default, and the current settings if the repo is already connected. It ends
+with suggested `configure.py` flags. Turn that into a short plan per repo and show it to
+the developer, for example:
+
+| frontend | Indexed |
 |---|---|
-| Claude Code | `.mcp.json`, `.claude/skills/cross-repo-feature-analysis/` |
-| Cursor | `.cursor/mcp.json` |
-| VS Code + Copilot | `.vscode/mcp.json`, `.github/copilot-instructions.md` |
+| Docs | `./knowledge`, `./docs` (12 .md) |
+| Code | `./packages/*/src`, `./apps/*/src` (.ts, .tsx) |
+| Extra types | `.vue` |
+| Left out | `./tests`, `docs/legacy.rst` (not .md) |
 
-For any other agent that supports MCP, copy the `mcpServers` block from `.mcp.json`
-into that agent's MCP config, and install this skill folder wherever the agent loads
-skills from.
+Ask what they want to change, and apply their judgement on top of the scan:
 
-Re-run `setup.py` whenever you add or remove a repo.
+- **Include** folders that explain behaviour: architecture docs, ADRs, API specs, and
+  the main application and library code.
+- **Leave out** tests (unless they are the best record of behaviour), generated code,
+  migrations, fixtures, sample data and vendored code. These add noise that pushes
+  real answers out of the top results.
+
+The indexer has some hard limits, so steer around them:
+
+- **Only `.md` files are read as docs, and every `README.md` is skipped.** Important
+  content in a README, or in `.rst` or `.adoc` files, needs to be summarised or
+  converted into a `.md` file under `knowledge/` (see step 5).
+- **Folders are read recursively with no exclusions.** Never use the repo root (`.`), or
+  any folder the scan marks ✗ because it contains `node_modules/`, build output or a
+  venv. Use the narrower paths or `*/src` globs the scan suggests instead.
+- **Keep doc folders separate.** Don't list a folder together with one of its
+  subfolders (for example `./docs` and `./docs/api`), or the same files are indexed
+  twice.
+
+## 4. Configure every repo in one command
+
+Run `configure.py` from this skill's `scripts/` folder with the **framework venv's
+Python**, passing the agreed plan as flags. That way the generated MCP configs point at
+an interpreter that has the dependencies installed. Keep glob values quoted, as the
+scan prints them, so the shell doesn't expand them.
+
+```bash
+~/agentic-orchestration/.venv/bin/python <this-skill>/scripts/configure.py \
+    --framework ~/agentic-orchestration \
+    --repo /abs/path/to/frontend \
+      --src 'frontend=./packages/*/src' --knowledge frontend=./docs --ext frontend=.vue \
+    --repo backend=/abs/path/to/api \
+      --src backend=./app --knowledge backend=./adr
+```
+
+The script:
+
+- downloads the embedding model (~90 MB) if it's missing
+- adds the repos to `orchestrator/mcp/config.yaml`, and drops the template's
+  placeholder repos
+- copies `mcp/` and `knowledge/` into each repo, then writes `repo_name`,
+  `display_name` and the indexing settings into that repo's `mcp/config.yaml`
+- runs `orchestrator/setup.py`, which writes `.mcp.json`, `.cursor/mcp.json`,
+  `.vscode/mcp.json`, the Copilot instructions and this skill into every repo
+
+The indexing flags are per repo, use the repo's id, and can be repeated:
+
+| Flag | Sets | Notes |
+|---|---|---|
+| `--src name=PATH` | `src_path` | Folder or quoted glob. `name=null` turns off code indexing. |
+| `--knowledge name=PATH` | `knowledge_path` | Extra `.md` doc folders. `./knowledge` is always kept. |
+| `--ext name=.EXT` | `extra_extensions` | Extra file types to index as code. `name=null` clears them. |
+
+A repo with no flags keeps its current settings. A new repo with no `--src` gets a
+guessed source folder. If a repo's indexing settings change, the script deletes its
+`.chroma_db/` cache so the index is rebuilt on the next query.
+
+Check the script's summary line for each repo against the agreed plan.
+
+The script refuses to touch a repo that already has an unrelated `mcp/` folder. If
+that happens, explain the clash and let the developer decide what to do.
+
+## 5. Seed the knowledge docs
+
+Retrieval is only as good as each repo's `.md` docs. For every repo with 0 knowledge
+docs, or whose key docs are in a README or a non-`.md` format, offer to draft a starter
+`knowledge/architecture.md`, then do it if they agree. Read the repo's README,
+top-level layout and main entry points, and write down what's actually there:
+
+- what the repo does
+- its main components, and where they live
+- the APIs, events or schemas it exposes or consumes, and which other repos it talks to
+
+Use concrete names: endpoints, class names, file paths. Those are what the search
+matches on. Then suggest the developer review the draft.
+
+New docs are only picked up once the index is rebuilt. If the repo already has a
+`.chroma_db/` folder, delete it after seeding.
+
+## 6. Load the servers
+
+The agent only loads MCP servers when it starts. Tell the developer to:
+
+- **Claude Code**: restart it in the repo and approve the project MCP servers when
+  asked. `/mcp` shows their status.
+- **Cursor**: enable the servers in Settings → MCP.
+- **VS Code + Copilot**: reload the window and allow the servers.
+
+After the restart, the feature request can go through the normal workflow. The first
+query in each repo is slow (10–60 s) while its search index is built.
+
+## Later changes
+
+- **Add a repo**: run `scan.py` on it, then re-run `configure.py` with only the new
+  `--repo` and its indexing flags. Existing repos keep their settings, and every repo's
+  config is regenerated to include the new peer.
+- **Change what a repo indexes**: re-run `configure.py` with that repo's `--repo` and
+  the new `--src`, `--knowledge` or `--ext` flags. Each flag type you pass replaces that
+  setting in full. The cache is cleared automatically.
+- **Docs or code changed a lot**: delete `.chroma_db/` in that repo. The index is
+  rebuilt on the next query.
+- **Each repo gets a `.chroma_db/` index folder.** Suggest adding it to that repo's
+  `.gitignore`.
 
 ## Troubleshooting
 
-- **Tools don't appear**: restart the client or reload the MCP servers. In Claude Code,
-  run `/mcp` to check the server status.
-- **`ModuleNotFoundError`**: the server is running with the wrong Python. Re-run
-  `setup.py` from the activated venv. The Claude Code and Cursor configs pin that
-  interpreter.
-- **Empty results**: check that `knowledge/` contains `.md` files. Delete `.chroma_db/`
-  in the repo to force a re-index.
+- **`ModuleNotFoundError` when a server starts**: the configs point at the wrong
+  Python. Re-run `configure.py` with the framework venv's Python.
+- **A repo returns nothing relevant**: run `scan.py` on it and compare with its
+  `mcp/config.yaml`. Usually the docs aren't in `.md`, they're in a README, or
+  `src_path` points at the wrong folder.
+- **Answers are full of irrelevant code**: the index includes tests, generated code
+  or vendored code. Narrow `--src` and re-run `configure.py`.
