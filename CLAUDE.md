@@ -62,6 +62,10 @@ The MCP server, RAG engine, and copilot instructions all read from it. No code c
 **setup.py generates everything**: Running `python orchestrator/setup.py` generates:
 - `.vscode/mcp.json` for every listed repo (absolute paths, no env vars needed)
 - `.github/copilot-instructions.md` for every listed repo (repo-specific, no placeholders)
+- `.mcp.json` (Claude Code) and `.cursor/mcp.json` (Cursor) for every listed repo, using
+  `sys.executable` as the command so those clients need not be launched from the venv
+- `.claude/skills/cross-repo-feature-analysis/` copied from `skills/` (the Agent Skill,
+  which is generic — it reads `repo_name` from the repo's `mcp/config.yaml` at runtime)
 It must be re-run whenever repos are added/removed.
 
 **Absolute paths in mcp.json**: Generated mcp.json files use absolute paths so VS Code

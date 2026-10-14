@@ -420,6 +420,32 @@ You'll see every MCP call, RAG query, and routing decision in real time:
 
 ---
 
+## Way C — Claude Code, Cursor and other agents (Agent Skill)
+
+The flow is also packaged as a portable [Agent Skill](https://agentskills.io):
+[`skills/cross-repo-feature-analysis/`](skills/cross-repo-feature-analysis/SKILL.md).
+It tells the agent when to use the MCP servers and how: route first, query its own
+repo, query the selected peers, then write the Feature Analysis Document.
+
+After steps 1–4, run `python orchestrator/setup.py` from the activated venv. Besides
+the VS Code files, it writes these into every repo:
+
+| Client | Generated |
+|---|---|
+| Claude Code | `.mcp.json` + `.claude/skills/cross-repo-feature-analysis/` |
+| Cursor | `.cursor/mcp.json` |
+
+These configs pin the venv's Python interpreter, so the client doesn't have to be
+launched from the venv. Then:
+
+- **Claude Code**: run `claude` in any repo, approve the project MCP servers, and ask
+  for a feature, e.g. *"What would it take to add real-time password-strength feedback
+  to login?"*
+- **Cursor / other agents**: enable the MCP servers, then install the skill folder
+  wherever your agent loads skills from.
+
+---
+
 ## Adding a new repo later
 
 1. Add an entry to `orchestrator/mcp/config.yaml`
@@ -455,7 +481,10 @@ agentic-orchestration-framework/        ← this repo (cloned once)
 │   │   ├── router.py                    ← generic routing logic (do not edit)
 │   │   ├── router_mcp_server.py         ← MCP server (do not edit)
 │   │   └── demo_logger.py               ← logging (do not edit)
-│   └── setup.py                         ← ★ WAY B: run this to generate VS Code config
+│   └── setup.py                         ← ★ WAY B/C: generates VS Code, Claude Code, Cursor config
+│
+├── skills/
+│   └── cross-repo-feature-analysis/     ← Agent Skill (installed into repos by setup.py)
 │
 └── repo-agent/                          ← copy contents into each of your repos
     ├── mcp/

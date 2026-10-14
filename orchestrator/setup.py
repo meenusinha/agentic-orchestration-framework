@@ -7,14 +7,17 @@ What it does:
   1. Reads mcp/config.yaml
   2. For every listed repo: generates .vscode/mcp.json (absolute paths, no env vars)
   3. For every listed repo: generates .github/copilot-instructions.md (repo-specific)
-  4. Generates .vscode/mcp.json for the orchestrator itself
-  5. Prints a summary
+  4. For every listed repo: generates .mcp.json (Claude Code) and .cursor/mcp.json (Cursor)
+     and installs the cross-repo-feature-analysis skill into .claude/skills/
+  5. Generates .vscode/mcp.json for the orchestrator itself
+  6. Prints a summary
 
 Usage:
   cd orchestrator/
   python setup.py
 """
 import json
+import shutil
 import sys
 from pathlib import Path
 from textwrap import dedent
@@ -29,6 +32,8 @@ ORCHESTRATOR_DIR = Path(__file__).parent.resolve()
 FRAMEWORK_DIR    = ORCHESTRATOR_DIR.parent
 MODEL_PATH       = str(FRAMEWORK_DIR / "models" / "all-MiniLM-L6-v2")
 CONFIG_PATH      = ORCHESTRATOR_DIR / "mcp" / "config.yaml"
+SKILL_NAME       = "cross-repo-feature-analysis"
+SKILL_DIR        = FRAMEWORK_DIR / "skills" / SKILL_NAME
 
 if not CONFIG_PATH.exists():
     print(f"ERROR: Config not found at {CONFIG_PATH}")
@@ -109,6 +114,29 @@ def _write_mcp_json(target_dir: Path) -> Path:
     out = vscode_dir / "mcp.json"
     with open(out, "w") as f:
         json.dump({"servers": _all_servers()}, f, indent=2)
+    return out
+
+
+def _write_mcp_servers_json(out: Path) -> Path:
+    """Write the {"mcpServers": ...} format used by Claude Code and Cursor.
+
+    These clients are often launched outside the venv, so pin the interpreter
+    that ran setup.py instead of relying on "python" being on PATH.
+    """
+    servers = _all_servers()
+    for cfg in servers.values():
+        cfg["command"] = sys.executable
+    out.parent.mkdir(exist_ok=True)
+    with open(out, "w") as f:
+        json.dump({"mcpServers": servers}, f, indent=2)
+    return out
+
+
+def _install_skill(target_dir: Path) -> Path:
+    out = target_dir / ".claude" / "skills" / SKILL_NAME
+    if out.exists():
+        shutil.rmtree(out)
+    shutil.copytree(SKILL_DIR, out)
     return out
 
 
@@ -218,9 +246,15 @@ print(f"\nOrchestrator setup — {len(resolved)} repo(s) found in config\n")
 for r in resolved:
     mcp_json_path = _write_mcp_json(r["path"])
     instructions_path = _write_copilot_instructions(r)
+    claude_mcp_path = _write_mcp_servers_json(r["path"] / ".mcp.json")
+    cursor_mcp_path = _write_mcp_servers_json(r["path"] / ".cursor" / "mcp.json")
+    skill_path = _install_skill(r["path"])
     print(f"  ✓ {r['name']}")
     print(f"      mcp.json            → {mcp_json_path}")
     print(f"      copilot-instructions→ {instructions_path}")
+    print(f"      claude code mcp     → {claude_mcp_path}")
+    print(f"      cursor mcp          → {cursor_mcp_path}")
+    print(f"      skill               → {skill_path}")
 
 # Orchestrator's own mcp.json
 orch_out = _write_mcp_json(ORCHESTRATOR_DIR)
@@ -231,10 +265,11 @@ print(f"""
 Setup complete.
 
 Next:
-  1. Open each repo in VS Code (reload windows that are already open)
-  2. Switch Copilot chat to Agent mode
-  3. Type a feature request
-  4. Watch the live log:
+  VS Code + Copilot: activate the venv, open each repo in VS Code from that
+                     terminal, switch Copilot chat to Agent mode
+  Claude Code:       run `claude` inside any repo and approve the project MCP servers
+  Cursor:            open any repo and enable the MCP servers in Settings → MCP
+  Then type a feature request and watch the live log:
 
        tail -f {log_file}
 """)
