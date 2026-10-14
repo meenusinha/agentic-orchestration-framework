@@ -71,7 +71,7 @@ The indexer has some hard limits, so steer around them:
 
 - **Only `.md` files are read as docs, and every `README.md` is skipped.** Important
   content in a README, or in `.rst` or `.adoc` files, needs to be summarised or
-  converted into a `.md` file under `knowledge/` (see step 5).
+  converted into a `.md` file under `knowledge/` (see step 6).
 - **Folders are read recursively with no exclusions.** Never use the repo root (`.`), or
   any folder the scan marks ✗ because it contains `node_modules/`, build output or a
   venv. Use the narrower paths or `*/src` globs the scan suggests instead.
@@ -79,7 +79,31 @@ The indexer has some hard limits, so steer around them:
   subfolders (for example `./docs` and `./docs/api`), or the same files are indexed
   twice.
 
-## 4. Configure every repo in one command
+## 4. Get the embedding model
+
+The search index needs the `all-MiniLM-L6-v2` embedding model in
+`<framework>/models/all-MiniLM-L6-v2/`. If it's already there, skip this step.
+Otherwise, see what's already on the machine:
+
+```bash
+~/agentic-orchestration/.venv/bin/python <this-skill>/scripts/configure.py \
+    --framework ~/agentic-orchestration --find-model
+```
+
+Then **ask the developer** whether they already have the model. Mention any copies
+the command found (for example in the Hugging Face cache), and ask whether they have
+one somewhere else, such as a shared drive on an offline machine.
+
+- **They have a copy:** use `--model-from <path>` in the next step. The script checks
+  it's a complete all-MiniLM-L6-v2 before copying it.
+- **They don't:** ask for permission to download it (about 90 MB from Hugging Face).
+  Use `--download-model` only after they say yes.
+
+`configure.py` never downloads without `--download-model`. If neither flag is given
+and the model is missing, it stops before changing anything and lists the copies it
+found.
+
+## 5. Configure every repo in one command
 
 Run `configure.py` from this skill's `scripts/` folder with the **framework venv's
 Python**, passing the agreed plan as flags. That way the generated MCP configs point at
@@ -88,7 +112,7 @@ scan prints them, so the shell doesn't expand them.
 
 ```bash
 ~/agentic-orchestration/.venv/bin/python <this-skill>/scripts/configure.py \
-    --framework ~/agentic-orchestration \
+    --framework ~/agentic-orchestration --model-from <path-from-step-4> \
     --repo /abs/path/to/frontend \
       --src 'frontend=./packages/*/src' --knowledge frontend=./docs --ext frontend=.vue \
     --repo backend=/abs/path/to/api \
@@ -97,7 +121,8 @@ scan prints them, so the shell doesn't expand them.
 
 The script:
 
-- downloads the embedding model (~90 MB) if it's missing
+- copies (`--model-from`) or downloads (`--download-model`) the embedding model if
+  it's missing
 - adds the repos to `orchestrator/mcp/config.yaml`, and drops the template's
   placeholder repos
 - copies `mcp/` and `knowledge/` into each repo, then writes `repo_name`,
@@ -122,7 +147,7 @@ Check the script's summary line for each repo against the agreed plan.
 The script refuses to touch a repo that already has an unrelated `mcp/` folder. If
 that happens, explain the clash and let the developer decide what to do.
 
-## 5. Seed the knowledge docs
+## 6. Seed the knowledge docs
 
 Retrieval is only as good as each repo's `.md` docs. For every repo with 0 knowledge
 docs, or whose key docs are in a README or a non-`.md` format, offer to draft a starter
@@ -139,14 +164,18 @@ matches on. Then suggest the developer review the draft.
 New docs are only picked up once the index is rebuilt. If the repo already has a
 `.chroma_db/` folder, delete it after seeding.
 
-## 6. Load the servers
+## 7. Load the servers
 
 The agent only loads MCP servers when it starts. Tell the developer to:
 
 - **Claude Code**: restart it in the repo and approve the project MCP servers when
   asked. `/mcp` shows their status.
 - **Cursor**: enable the servers in Settings → MCP.
-- **VS Code + Copilot**: reload the window and allow the servers.
+- **VS Code + Copilot**: reload the window and allow the servers. VS Code stops changed
+  servers after a re-configure without restarting them, so reload after every
+  `configure.py` run. Tell the developer to start requests with
+  `/cross-repo-feature-analysis`, because small auto-selected models may otherwise
+  skip the MCP tools.
 
 After the restart, the feature request can go through the normal workflow. The first
 query in each repo is slow (10–60 s) while its search index is built.

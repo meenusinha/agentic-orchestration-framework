@@ -429,8 +429,10 @@ repo, query the selected peers, then write the Feature Analysis Document.
 
 **Guided setup:** install only the skill and ask your agent something like *"set up
 cross-repo analysis for ../frontend and ../backend"*. The agent clones the framework,
-uses `scripts/scan.py` to propose which docs and code each repo should index, agrees
-that plan with you, then runs `scripts/configure.py`, which does steps 2–5 in one go.
+uses `scripts/scan.py` to propose which docs and code each repo should index, and agrees
+that plan with you. It asks whether you already have the embedding model, and copies
+your copy or downloads one only with your permission. Then it runs
+`scripts/configure.py`, which does steps 2–5 in one go.
 It can also draft starter `knowledge/` docs for repos that don't have any.
 
 **Manual setup:** after steps 1–4, run `python orchestrator/setup.py` from the
@@ -447,6 +449,11 @@ launched from the venv. Then:
 - **Claude Code**: run `claude` in any repo, approve the project MCP servers, and ask
   for a feature, e.g. *"What would it take to add real-time password-strength feedback
   to login?"*
+- **VS Code + Copilot**: the skill is installed in `.claude/skills/`, where Copilot finds
+  it. Start your request with **`/cross-repo-feature-analysis`**. In testing, a small
+  auto-selected model (`mai-code-1.1-flash`) answered from local files alone, skipping
+  the MCP tools, unless the skill was invoked by name. A stronger model may trigger it
+  without the prefix.
 - **Cursor / other agents**: enable the MCP servers, then install the skill folder
   wherever your agent loads skills from.
 
@@ -520,6 +527,7 @@ agentic-orchestration-framework/        ← this repo (cloned once)
 | `ModuleNotFoundError: chromadb` | Run `pip install -r requirements.txt` in your venv |
 | `ModuleNotFoundError: mcp` in the MCP server log (wrong Python) | Re-run `setup.py` with the venv activated; the configs pin the Python that ran it |
 | MCP servers stopped after re-running `setup.py` | Reload the VS Code window, or restart them from the MCP Servers view |
+| Copilot answers without calling the MCP tools | Start the request with `/cross-repo-feature-analysis`, or pick a stronger model |
 | RAG returns nothing | Check that `knowledge/` has `.md` files; delete `.chroma_db/` to re-index |
 | `OSError: No such file or directory: '.../all-MiniLM-L6-v2'` | Model files missing — copy `models/all-MiniLM-L6-v2/` into the repo root |
 | `path does not exist` warning in setup.py | The path in `orchestrator/mcp/config.yaml` is wrong or the repo isn't cloned yet |

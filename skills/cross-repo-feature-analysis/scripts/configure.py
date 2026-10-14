@@ -3,7 +3,10 @@
 Connect repos to the agentic-orchestration-framework in one step.
 
 Does steps 2-5 of the README for the agent:
-  1. Downloads the embedding model into <framework>/models/ if it is missing
+  1. Puts the embedding model in <framework>/models/ if it is missing — copied
+     from an existing copy (--model-from) or downloaded (--download-model).
+     It never downloads without --download-model; with neither flag it stops
+     and lists any copies it finds on this machine, so the user can choose.
   2. Adds/updates each repo in <framework>/orchestrator/mcp/config.yaml
   3. Copies repo-agent/mcp/ and repo-agent/knowledge/ into each repo and
      fills in repo_name, display_name and what to index (src_path,
@@ -20,11 +23,17 @@ Indexing flags are repeatable and per repo (NAME is the repo id):
 If a repo's indexing settings change, its .chroma_db/ cache is deleted so the
 index is rebuilt with the new settings on the next query.
 
+Embedding model (only needed while <framework>/models/all-MiniLM-L6-v2 is missing):
+  --model-from PATH          copy an existing all-MiniLM-L6-v2 folder (verified first)
+  --download-model           download it from Hugging Face (~90 MB)
+  --find-model               just list usable copies found on this machine, then exit
+
 Run it with the framework venv's Python so the generated configs pin it:
   <framework>/.venv/bin/python configure.py --framework <framework> \\
       --repo /abs/path/frontend --repo backend=/abs/path/api --src backend=./app
 """
 import argparse
+import os
 import re
 import shutil
 import subprocess
@@ -38,6 +47,13 @@ except ImportError:
     sys.exit(1)
 
 MODEL_ID       = "sentence-transformers/all-MiniLM-L6-v2"
+# Only what sentence-transformers loads. The Hugging Face repo also carries ONNX,
+# OpenVINO, TF, Rust and .bin weights (~950 MB in all) that are never used.
+MODEL_FILES    = [
+    "config.json", "config_sentence_transformers.json", "modules.json",
+    "sentence_bert_config.json", "special_tokens_map.json", "tokenizer.json",
+    "tokenizer_config.json", "vocab.txt", "model.safetensors", "1_Pooling/config.json",
+]
 AGENT_FILES    = ("mcp_server.py", "repo_rag.py", "demo_logger.py")
 SRC_CANDIDATES = ("src", "lib", "app", "pkg", "source")
 PLACEHOLDER    = "/absolute/path/to/"
@@ -82,24 +98,107 @@ def _guess_src(repo: Path) -> str | None:
     return None
 
 
-def _ensure_model(framework: Path) -> None:
-    model_dir = framework / "models" / "all-MiniLM-L6-v2"
-    if (model_dir / "config.json").exists():
+def _model_problem(d: Path) -> str | None:
+    """Why `d` is not a usable all-MiniLM-L6-v2 sentence-transformers folder, or None."""
+    import json
+    if not d.is_dir():
+        return "not a folder"
+    for f in ("config.json", "modules.json", "1_Pooling/config.json"):
+        if not (d / f).is_file():
+            return f"missing {f}"
+    if not any((d / f).is_file() for f in ("tokenizer.json", "vocab.txt")):
+        return "missing tokenizer files"
+    weights = [d / f for f in ("model.safetensors", "pytorch_model.bin") if (d / f).is_file()]
+    if not weights:
+        return "missing model weights (model.safetensors or pytorch_model.bin)"
+    if max(w.stat().st_size for w in weights) < 50_000_000:  # real weights are ~90 MB
+        return "model weights look incomplete (under 50 MB)"
+    try:
+        cfg = json.loads((d / "config.json").read_text())
+    except (OSError, ValueError):
+        return "unreadable config.json"
+    if cfg.get("hidden_size") != 384 or cfg.get("num_hidden_layers") != 6:
+        return "a different model, not all-MiniLM-L6-v2 (expected 384 dims, 6 layers)"
+    return None
+
+
+def _find_model_copies() -> list[Path]:
+    """Usable copies in the usual sentence-transformers / Hugging Face caches."""
+    homes = [Path(os.environ[v]).expanduser() for v in ("HF_HUB_CACHE", "HUGGINGFACE_HUB_CACHE") if v in os.environ]
+    if "HF_HOME" in os.environ:
+        homes.append(Path(os.environ["HF_HOME"]).expanduser() / "hub")
+    homes.append(Path.home() / ".cache" / "huggingface" / "hub")
+    candidates = [s for h in homes
+                  for s in sorted((h / f"models--{MODEL_ID.replace('/', '--')}" / "snapshots").glob("*"))]
+    st_home = Path(os.environ.get("SENTENCE_TRANSFORMERS_HOME", Path.home() / ".cache" / "torch" / "sentence_transformers"))
+    candidates.append(st_home / MODEL_ID.replace("/", "_"))
+    seen, found = set(), []
+    for c in candidates:
+        if c.exists() and c.resolve() not in seen and _model_problem(c) is None:
+            seen.add(c.resolve())
+            found.append(c)
+    return found
+
+
+def _check_model_plan(model_dir: Path, model_from: Path | None, download: bool) -> None:
+    """Fail before writing anything if the model is missing and the user hasn't chosen."""
+    if _model_problem(model_dir) is None:
+        return
+    if model_from is not None:
+        problem = _model_problem(model_from)
+        if problem:
+            raise SystemExit(f"ERROR: --model-from {model_from} is not usable: {problem}")
+        return
+    if download:
+        return
+    found = _find_model_copies()
+    lines = [f"ERROR: the embedding model is missing from {model_dir}.",
+             "Ask the user whether they already have all-MiniLM-L6-v2, then re-run with one of:",
+             "  --model-from PATH   copy their existing copy (verified first)",
+             "  --download-model    download it from Hugging Face (~90 MB) — only with their permission"]
+    if found:
+        lines.append("Usable copies already on this machine:")
+        lines += [f"  {f}" for f in found]
+    raise SystemExit("\n".join(lines))
+
+
+def _ensure_model(model_dir: Path, model_from: Path | None, download: bool) -> None:
+    if _model_problem(model_dir) is None:
         print(f"  ✓ embedding model present  {model_dir}")
         return
-    print(f"  … downloading {MODEL_ID} (~90 MB)")
-    from huggingface_hub import snapshot_download  # installed with sentence-transformers
-    snapshot_download(MODEL_ID, local_dir=str(model_dir))
-    print(f"  ✓ embedding model downloaded  {model_dir}")
+    # Copy/download into the folder in place: it holds the framework's tracked .gitkeep
+    if model_from is not None:
+        # Hugging Face cache snapshots are symlinks into blobs/; copy the real files
+        shutil.copytree(model_from, model_dir, symlinks=False, dirs_exist_ok=True)
+        print(f"  ✓ embedding model copied from {model_from}")
+    else:
+        print(f"  … downloading {MODEL_ID} (~90 MB)", flush=True)
+        from huggingface_hub import snapshot_download  # installed with sentence-transformers
+        snapshot_download(MODEL_ID, local_dir=str(model_dir), allow_patterns=MODEL_FILES)
+        print(f"  ✓ embedding model downloaded  {model_dir}")
+    problem = _model_problem(model_dir)
+    if problem:
+        raise SystemExit(f"ERROR: embedding model in {model_dir} is not usable after setup: {problem}")
 
 
 def _set_key(text: str, key: str, value) -> str:
-    """Replace a top-level `key: ...` line, keeping the template's comments."""
+    """Replace a top-level `key: ...` entry, keeping the template's comments.
+
+    The entry includes any continuation lines (indented or `- ` items), so a
+    hand-written block list such as
+        src_path:
+          - ./a
+    is replaced whole instead of leaving its items behind.
+    """
     line = f"{key}: {yaml.safe_dump(value, default_flow_style=True).strip().removesuffix('...').strip()}"
-    pattern = re.compile(rf"(?m)^{re.escape(key)}:.*$")
+    pattern = re.compile(rf"(?m)^{re.escape(key)}:.*(?:\n(?:[ \t]+\S.*|-.*))*")
     if pattern.search(text):
-        return pattern.sub(lambda _: line, text, count=1)
-    return text.rstrip("\n") + f"\n{line}\n"
+        text = pattern.sub(lambda _: line, text, count=1)
+    else:
+        text = text.rstrip("\n") + f"\n{line}\n"
+    if (yaml.safe_load(text) or {}).get(key) != value:
+        raise SystemExit(f"ERROR: could not update '{key}' in mcp/config.yaml safely — edit it by hand")
+    return text
 
 
 def _install_repo_agent(framework: Path, name: str, display: str, repo: Path, indexing: dict) -> str:
@@ -150,6 +249,12 @@ def main() -> None:
                     help="source folder/glob to index for a repo (repeatable); NAME=null for none")
     ap.add_argument("--knowledge", action="append", default=[], metavar="NAME=PATH",
                     help="extra .md doc folder for a repo (repeatable); ./knowledge is always kept")
+    ap.add_argument("--model-from", metavar="PATH",
+                    help="copy an existing all-MiniLM-L6-v2 folder into <framework>/models/")
+    ap.add_argument("--download-model", action="store_true",
+                    help="download the embedding model (~90 MB) if it is missing")
+    ap.add_argument("--find-model", action="store_true",
+                    help="list usable copies of the embedding model on this machine and exit")
     ap.add_argument("--ext", action="append", default=[], metavar="NAME=.EXT",
                     help="extra file extension to index as code for a repo (repeatable)")
     args = ap.parse_args()
@@ -157,6 +262,19 @@ def main() -> None:
     framework = Path(args.framework).expanduser().resolve()
     if not (framework / "orchestrator" / "setup.py").exists():
         raise SystemExit(f"ERROR: {framework} is not an agentic-orchestration-framework clone")
+    model_dir  = framework / "models" / "all-MiniLM-L6-v2"
+    model_from = Path(args.model_from).expanduser().resolve() if args.model_from else None
+    if args.model_from and args.download_model:
+        raise SystemExit("ERROR: pass either --model-from or --download-model, not both")
+
+    if args.find_model:
+        state = "present" if _model_problem(model_dir) is None else "missing"
+        print(f"Framework model folder: {model_dir} ({state})")
+        found = _find_model_copies()
+        print("Usable copies on this machine:" if found else "No usable copies found in the usual caches.")
+        for f in found:
+            print(f"  {f}")
+        return
 
     def _per_repo(values: list[str]) -> dict[str, list[str]]:
         out: dict[str, list[str]] = {}
@@ -192,9 +310,10 @@ def main() -> None:
         raise SystemExit(f"ERROR: --src/--knowledge/--ext name(s) {sorted(unknown)} have no matching --repo")
     if len(set(by_name) | {name for name, _, _ in targets}) < 2:
         raise SystemExit("ERROR: at least two repos are needed for cross-repo analysis")
+    _check_model_plan(model_dir, model_from, args.download_model)
 
     print("\nConfiguring cross-repo orchestration\n")
-    _ensure_model(framework)
+    _ensure_model(model_dir, model_from, args.download_model)
 
     for name, display, path in targets:
         entry = by_name.get(name)

@@ -118,17 +118,10 @@ def _write_mcp_json(target_dir: Path) -> Path:
 
 
 def _write_mcp_servers_json(out: Path) -> Path:
-    """Write the {"mcpServers": ...} format used by Claude Code and Cursor.
-
-    These clients are often launched outside the venv, so pin the interpreter
-    that ran setup.py instead of relying on "python" being on PATH.
-    """
-    servers = _all_servers()
-    for cfg in servers.values():
-        cfg["command"] = sys.executable
+    """Write the {"mcpServers": ...} format used by Claude Code and Cursor."""
     out.parent.mkdir(exist_ok=True)
     with open(out, "w") as f:
-        json.dump({"mcpServers": servers}, f, indent=2)
+        json.dump({"mcpServers": _all_servers()}, f, indent=2)
     return out
 
 
@@ -265,8 +258,8 @@ print(f"""
 Setup complete.
 
 Next:
-  VS Code + Copilot: activate the venv, open each repo in VS Code from that
-                     terminal, switch Copilot chat to Agent mode
+  VS Code + Copilot: open each repo (reload windows already open), switch Copilot
+                     chat to Agent mode
   Claude Code:       run `claude` inside any repo and approve the project MCP servers
   Cursor:            open any repo and enable the MCP servers in Settings → MCP
   Then type a feature request and watch the live log:
