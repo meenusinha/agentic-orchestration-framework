@@ -1,6 +1,21 @@
-mcp[cli]<2   # servers use mcp.server.fastmcp, removed in mcp 2.x
-fastmcp
-chromadb
-pysqlite3-binary; sys_platform == "linux"   # only needed where system sqlite3 < 3.35 (e.g. RHEL8)
-sentence-transformers
+# Direct dependencies. For a reproducible, tamper-evident install use the
+# hash-locked file instead:  pip install --require-hashes -r requirements.lock
+# Regenerate the lock after editing this file (see README "Security").
+mcp[cli]<2                    # servers use mcp.server.fastmcp, removed in mcp 2.x
+sentence-transformers>=6.0    # CVE-2026-68770 (local-path code execution) fixed in 6.0
+numpy                         # vector math for the code-graph index
 pyyaml
+# Code graph: tree-sitter parsers (prebuilt wheels, offline, no code generation at runtime)
+tree-sitter>=0.25
+tree-sitter-c
+tree-sitter-cpp
+tree-sitter-python
+tree-sitter-matlab
+tree-sitter-perl>=1.2,<2        # 2.x is a brand-new major (Sep–Oct 2026); revisit once it has aged
+tree-sitter-markdown
+tree-sitter-javascript
+tree-sitter-typescript
+tree-sitter-java
+tree-sitter-go
+tree-sitter-rust
+tree-sitter-c-sharp

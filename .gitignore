@@ -3,3 +3,4 @@ __pycache__/
 *.pyc
 .chroma_db/
 feature_analysis.md
+.rag_index/

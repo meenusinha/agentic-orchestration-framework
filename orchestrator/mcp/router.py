@@ -1,7 +1,10 @@
-"""OrchestratorRouter — routes by querying each repo's RAG via MCP.
+"""OrchestratorRouter — picks the peer repos a feature request touches.
 
-Routing is based on actual content returned by each repo's RAG (docs, interfaces,
-source code), not description embeddings. Config is read from config.yaml.
+Primary: searches every repo's code graph directly (read-only, one model load)
+and follows IDL interface links: repos that define, serve or call an interface
+used by the requesting repo's matching code are selected with the reason.
+Fallback for repos whose index does not exist yet: spawn the repo's MCP server
+and score its query_repo answer (the original method). Config: config.yaml.
 """
 import json
 import subprocess
@@ -11,7 +14,7 @@ from pathlib import Path
 import yaml
 
 sys.path.insert(0, str(Path(__file__).parent))
-from demo_logger import log
+from demo_logger import log, content
 
 
 def _mcp_call(server_script: str, tool_name: str, arguments: dict, timeout: int = 60) -> str:
@@ -45,9 +48,9 @@ def _mcp_call(server_script: str, tool_name: str, arguments: dict, timeout: int 
         try:
             msg = json.loads(line)
             if msg.get("id") == 2:
-                content = msg.get("result", {}).get("content", [])
-                if content:
-                    return content[0].get("text", "(empty response)")
+                parts = msg.get("result", {}).get("content", [])
+                if parts:
+                    return parts[0].get("text", "(empty response)")
         except json.JSONDecodeError:
             continue
     return "(no response)"
@@ -64,10 +67,12 @@ def _score_response(response: str) -> float:
         return 0.0
     if "relevant knowledge:" in lower:
         idx = lower.index("relevant knowledge:")
-        content = response[idx + len("relevant knowledge:"):].strip()
+        body = response[idx + len("relevant knowledge:"):]
     else:
-        content = response.strip()
-    return min(len(content) / 800.0, 1.0)
+        body = response
+    # Ignore the untrusted-content frame lines so they don't inflate every score
+    body = "\n".join(l for l in body.splitlines() if not l.startswith("<<<")).strip()
+    return min(len(body) / 800.0, 1.0)
 
 
 class OrchestratorRouter:
@@ -96,22 +101,131 @@ class OrchestratorRouter:
             script = repo_path / "mcp" / "mcp_server.py"
             self._repo_display[name] = display
             self._repo_mcp_scripts[name] = str(script)
+            self._repo_paths = getattr(self, "_repo_paths", {})
+            self._repo_paths[name] = repo_path
+        self._embed = None
 
         log("orchestrator_router", "INFO",
             f"Router ready — will query {len(self._repo_mcp_scripts)} repo MCP servers")
 
+    # ── code-graph routing ────────────────────────────────────────────────────
+    def _embedder(self):
+        if self._embed is None:
+            fw = Path(__file__).resolve().parents[2] / "repo-agent" / "mcp"
+            if str(fw) not in sys.path:
+                sys.path.insert(0, str(fw))
+            import os
+            from repo_rag import RepoRAG  # noqa: F401  (sets offline mode before ML imports)
+            from repo_rag import verify_model_dir
+            import numpy as np
+            import torch
+            from sentence_transformers import SentenceTransformer
+            path = os.environ.get("EMBEDDING_MODEL_PATH", "")
+            verify_model_dir(path)
+            model = SentenceTransformer(path, local_files_only=True, trust_remote_code=False,
+                                        model_kwargs={"dtype": torch.float32})
+            self._embed = lambda q: np.asarray(model.encode([q], normalize_embeddings=True,
+                                                            show_progress_bar=False)[0], dtype=np.float32)
+        return self._embed
+
+    def _graph_view(self, name):
+        fw = Path(__file__).resolve().parents[2] / "repo-agent" / "mcp"
+        if str(fw) not in sys.path:
+            sys.path.insert(0, str(fw))
+        from codegraph.store import Store
+        return Store.open_readonly(self._repo_paths[name] / ".rag_index")
+
     def get_relevant_repos(
         self, requesting_repo: str, feature_description: str, top_k: int = 2, timeout: int = 600
     ) -> tuple[list[str], dict[str, float]]:
-        """
-        Query each peer repo's RAG via MCP and rank by content relevance.
-        Returns (selected_repo_names, all_scores).
-        timeout: seconds to wait per repo (default 600 — first run builds the index)
-        """
-        log("orchestrator_router", "ROUTING", f"Routing: '{feature_description[:70]}...'")
+        """Returns (selected_repo_names, all_scores); reasons are in self.last_reasons."""
+        log("orchestrator_router", "ROUTING", f"Routing: {content(feature_description[:70])}")
+        self.last_reasons: dict[str, list[str]] = {}
+        try:
+            return self._graph_route(requesting_repo, feature_description, top_k, timeout)
+        except Exception as e:                      # never fail routing: fall back to the original method
+            log("orchestrator_router", "WARN", f"Graph routing unavailable ({type(e).__name__}); using MCP scoring")
+            return self._mcp_route(requesting_repo, feature_description, top_k, timeout)
+
+    def _graph_route(self, requesting_repo, feature, top_k, timeout):
+        fw = Path(__file__).resolve().parents[2] / "repo-agent" / "mcp"
+        if str(fw) not in sys.path:
+            sys.path.insert(0, str(fw))
+        from codegraph.search import GraphSearch
+        embed = self._embedder()
+        q = embed(feature)
+        scores, linked_ifaces = {}, set()
+        registries = {}
+        for name in self._repo_mcp_scripts:
+            reg = self._repo_paths[name] / ".rag_index" / "interfaces.json"
+            try:
+                registries[name] = json.loads(reg.read_text())
+            except (OSError, ValueError):
+                pass
+            store = self._graph_view(name)
+            if store is None:
+                if name != requesting_repo:         # not indexed yet: original method for this repo
+                    resp = _mcp_call(self._repo_mcp_scripts[name], "query_repo", {"feature_request": feature},
+                                     timeout=timeout)
+                    scores[name] = _score_response(resp)
+                    self.last_reasons.setdefault(name, []).append("scored by query_repo (no index yet)")
+                continue
+            gs = GraphSearch(store, name, lambda _q: q, peers=[])
+            best = float((gs.mat @ q).max()) if len(gs.uids) else 0.0
+            hits = gs.search(feature, k=6)
+            if name == requesting_repo:
+                frontier, seen = [u for u, _ in hits], set()
+                for _ in range(2):                  # matched code + its callers (2 levels): a C helper
+                    nxt = []                        # called by a servant still belongs to its interface
+                    for uid in frontier:
+                        for src, *_ in store.edges_to(uid, ("CALLS",)):
+                            if src not in seen:
+                                seen.add(src)
+                                nxt.append(src)
+                    frontier = nxt
+                for uid in [u for u, _ in hits] + list(seen):   # interfaces the requesting repo's matches touch
+                    for _, dst, t, dname, _ in store.edges_from(uid, ("IMPLEMENTS", "CALLS_OPERATION")):
+                        linked_ifaces.add(dname)    # interface or interface::operation, resolved below
+                for uid, _ in hits:
+                    n = store.node(uid)
+                    if n and n["kind"] in ("idl_interface", "idl_operation"):
+                        linked_ifaces.add(n["qualname"] if n["kind"] == "idl_interface"
+                                          else n["qualname"].rsplit("::", 1)[0])
+                continue
+            scores[name] = round(max(best, 0.0), 3)
+            log("orchestrator_router", "ROUTING", f"  {name}: semantic relevance={scores[name]:.3f}")
+        # repos linked by an interface the requesting repo's code uses or provides
+        defined = {d["id"] for reg in registries.values() for d in reg.get("defines", [])}
+        linked_ifaces = {x if x in defined else x.rsplit("::", 1)[0] for x in linked_ifaces}
+        for iid in sorted(linked_ifaces):
+            for name, reg in registries.items():
+                if name == requesting_repo:
+                    continue
+                if any(d["id"] == iid for d in reg.get("defines", [])):
+                    self.last_reasons.setdefault(name, []).append(f"defines IDL interface {iid}")
+                links = reg.get("links", {})
+                procs = sorted({l.get("target") or "-" for l in links.get("implements", []) if l["interface"] == iid})
+                if procs:
+                    self.last_reasons.setdefault(name, []).append(f"serves {iid} (process {', '.join(procs)})")
+                procs = sorted({l.get("target") or "-" for l in links.get("consumes", []) if l["interface"] == iid})
+                if procs:
+                    self.last_reasons.setdefault(name, []).append(f"calls {iid} (process {', '.join(procs)})")
+        linked = [n for n in self.last_reasons if any(not r.startswith("scored") for r in self.last_reasons[n])]
+        ranked = sorted(scores.items(), key=lambda x: -x[1])
+        targets = sorted(linked, key=lambda n: -scores.get(n, 0))
+        for name, sc in ranked:
+            if len(targets) >= max(top_k, len(linked)):
+                break
+            if name not in targets:
+                targets.append(name)
+        for name in scores:
+            self.last_reasons.setdefault(name, [])
+        log("orchestrator_router", "RESULT", f"Selected: {targets}")
+        return targets, scores
+
+    def _mcp_route(self, requesting_repo, feature_description, top_k, timeout):
         peer_count = sum(1 for n in self._repo_mcp_scripts if n != requesting_repo)
         log("orchestrator_router", "ROUTING", f"Querying {peer_count} peer repos via MCP...")
-
         scores: dict[str, float] = {}
         for repo_name, script_path in self._repo_mcp_scripts.items():
             if repo_name == requesting_repo:
@@ -124,9 +238,7 @@ class OrchestratorRouter:
             scores[repo_name] = score
             log("orchestrator_router", "ROUTING",
                 f"  {repo_name}: relevance={score:.3f} ({len(response)} chars returned)")
-
         sorted_repos = sorted(scores.items(), key=lambda x: x[1], reverse=True)
-
         targets = [n for n, s in sorted_repos[:top_k] if s > 0]
         if len(targets) < top_k:
             for name, _ in sorted_repos:
@@ -134,6 +246,5 @@ class OrchestratorRouter:
                     targets.append(name)
                 if len(targets) >= top_k:
                     break
-
         log("orchestrator_router", "RESULT", f"Selected: {targets}")
         return targets, scores

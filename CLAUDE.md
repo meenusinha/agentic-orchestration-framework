@@ -27,7 +27,10 @@ Score = `min(content_length / 800, 1.0)`, 0.0 if "no relevant knowledge found".
 ```
 agentic-orchestration-framework/
 ├── README.md                        ← user-facing setup guide (keep accurate)
-├── requirements.txt                 ← mcp[cli], fastmcp, chromadb, sentence-transformers, pyyaml
+├── requirements.txt                 ← direct deps: mcp[cli]<2, sentence-transformers>=6, numpy, pyyaml
+├── requirements.lock                ← hash-locked, universal (uv pip compile --generate-hashes)
+├── models/granite-embedding-small-english-r2/  ← approved embedding model (pinned hash)
+├── .github/workflows/security.yml   ← pip-audit + lock-consistency CI
 ├── orchestrator/                    ← cloned once by the user; never copied into their repos
 │   ├── mcp/
 │   │   ├── config.yaml              ← USER EDITS THIS: lists all repos + their paths
@@ -40,7 +43,7 @@ agentic-orchestration-framework/
     ├── mcp/
     │   ├── config.yaml              ← USER EDITS THIS per repo: repo_name, components, src_path
     │   ├── mcp_server.py            ← FastMCP server exposing query_repo tool (reads config.yaml)
-    │   ├── repo_rag.py              ← RepoRAG class: indexes knowledge/ + source, serves queries
+    │   ├── repo_rag.py              ← RepoRAG: NumPy+JSON index in .rag_index/, model verification, secret redaction
     │   └── demo_logger.py           ← same logger as orchestrator (copy — no shared import)
     ├── knowledge/
     │   └── README.md                ← instructions for dropping .md docs
@@ -71,7 +74,7 @@ It must be re-run whenever repos are added/removed.
 and proposes per-repo `src_path` / `knowledge_path` / `extra_extensions`. Its
 `INDEXED_EXT` must stay in sync with `_DEFAULT_EXTENSIONS` in `repo_rag.py`.
 `configure.py` writes the orchestrator and per-repo configs from flags, clears a repo's
-`.chroma_db/` when its indexing settings change, then runs `setup.py`.
+`.rag_index/` when its indexing settings change, then runs `setup.py`.
 
 **Absolute paths in mcp.json**: Generated mcp.json files use absolute paths so VS Code
 can be opened from any terminal without setting env vars. The server `command` is
@@ -93,6 +96,53 @@ keyword similarity on repo descriptions.
 it falls back to source code. Returns `RELEVANT KNOWLEDGE:\n...` prefix for scorer to detect.
 
 ---
+
+## Code graph (repo-agent/mcp/codegraph/)
+
+| Module | Role |
+|---|---|
+| `model.py` | Node / Edge, node kinds, edge types, roles |
+| `parsers.py` | tree-sitter extraction for C, C++, Python (+ `_recover_missing` completeness pass) |
+| `langs.py` | table-driven extraction: MATLAB, Perl, JS/TS, Java, Go, Rust, C# (+ `recover`) |
+| `idl.py` | tolerant IDL-family parser (OMG/DDS/MIDL/AIDL/proto/thrift/ROS/in-house dialects) |
+| `docs.py` | Markdown → heading sections |
+| `extract.py` | picks the extractor per file (manifest `file_types` > extension) |
+| `structure.py` | roles (manifest > build facts > heuristics), Makefile/CMake/compile_commands (static, never run), generated code |
+| `relations.py` | CONTAINS, INCLUDES/IMPORTS, DECLARES, CALLS, INHERITS, TESTS, DOCUMENTS, BUILDS, DEPENDS_ON |
+| `interfaces.py` | IDL defines / references / resolver → IMPLEMENTS, CALLS_OPERATION, PROVIDES, CONSUMES; `interfaces.json` registry |
+| `indexer.py` | pipeline + incremental rebuild (file hashes, config fingerprint, peer signature); embeddings cached by text hash |
+| `store.py` | SQLite graph store (WAL, exclusive write txn, 0600, FTS5 with fallback); `open_readonly` for peers/router |
+| `search.py` | hybrid ranking, expansion, cross-repo `trace_interface`, `impact_of`, budgeted `assemble` |
+| `schemas.py` | Pydantic result models for the MCP tools |
+| `security.py` | secret-store file skip + newline-preserving redaction |
+
+**Never-cut invariant.** Definition nodes' `text` is the exact, complete source span;
+containers hold skeletons. Every extractor ends with a completeness pass that adds any
+function the walker missed (marked `recovered`). The budgeted assembler drops whole
+units into `more` — it never truncates. Only an *embedding input* may be shortened
+(model max 8192 tokens); stored and returned text never is. When you change an
+extractor, run a never-cut check over real code (every function-like syntax node must
+be inside some function/method node's text) before committing.
+
+**Interface linking is name-based with confidence**: qualified/skeleton/proxy/C-mapping
+matches ≥ 0.9, unique-operation-name fallback 0.5. Results always carry the confidence.
+
+## Security invariants (do not weaken)
+
+- **Offline only**: `repo_rag.py` forces `HF_HUB_OFFLINE`/`TRANSFORMERS_OFFLINE` before
+  importing ML libraries; `mcp_server.py` has no default model name (a missing
+  `EMBEDDING_MODEL_PATH` must fail, never download).
+- **Approved model only**: `verify_model_dir()` checks the pinned SHA-256 of
+  `model.safetensors`, rejects code/pickle files and non-standard module types, and the
+  model loads with `local_files_only=True, trust_remote_code=False`. Keep
+  `APPROVED_MODELS` (repo_rag.py) and `MODEL_SHA256` (configure.py) in sync.
+- **No pickle**: the graph is SQLite; vectors are raw float32 bytes.
+- **Private files**: `.rag_index/` is 0700/0600, written atomically; logs are 0600.
+- **Secrets**: `is_secret_file()` + `redact()` run before anything is embedded or
+  stored. Bump `INDEX_FORMAT` when selection or redaction rules change.
+- **Untrusted output**: `query_repo` wraps results in BEGIN/END UNTRUSTED markers and
+  neutralises `<<<`/`>>>` inside content; `router._score_response` ignores marker lines.
+- **Dependencies**: change `requirements.txt`, then regenerate `requirements.lock`.
 
 ## How the MCP stdio protocol works
 
@@ -134,8 +184,11 @@ Configurable via `extra_extensions` in `mcp/config.yaml`.
 
 ## Live logging
 
-All MCP interactions are logged to `DEMO_LOG_FILE` (default: `/tmp/mcp-orchestration.log`).
-Watch with `tail -f /tmp/mcp-orchestration.log`. Log levels: TOOL_CALL, ROUTING, RAG, RESULT, INDEX, INFO, WARN, ERROR.
+All MCP interactions are logged to `DEMO_LOG_FILE` (default:
+`~/.agentic-orchestration/logs/mcp-orchestration.log`, mode 0600, opened with O_NOFOLLOW).
+Code snippets and request text are logged only when `DEMO_LOG_CONTENT=1` (orchestrator
+config `log_content: true`); otherwise use `content()` from demo_logger, which logs lengths.
+Log levels: TOOL_CALL, ROUTING, RAG, RESULT, INDEX, INFO, WARN, ERROR.
 
 ---
 

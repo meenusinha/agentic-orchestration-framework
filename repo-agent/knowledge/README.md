@@ -1,3 +1,4 @@
+<!-- agentic-orchestration: framework template, not indexed -->
 # Knowledge Base
 
 Drop your Markdown documentation files here. The RAG agent will index them automatically on first startup.
@@ -22,10 +23,13 @@ Any `.md` file works. Good candidates:
 
 ## Re-indexing
 
-The index is cached in `.chroma_db/`. To force a re-index after updating docs:
+The index is cached in `.rag_index/`. To force a re-index after updating docs:
 
 ```bash
-rm -rf .chroma_db
+rm -rf .rag_index
 ```
+
+Don't put real secrets in these docs. Secret-looking values are replaced with
+`[REDACTED]` before indexing, but it's better if they're never there.
 
 The next MCP server startup will rebuild it.

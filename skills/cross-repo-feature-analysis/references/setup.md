@@ -14,7 +14,8 @@ Ask the developer for the repos that should know about each other. You need at l
 two. Make it easy for them:
 
 - Suggest the current repo, plus any sibling folders next to it that are git repos
-  (`ls ..`, then look for a `.git` folder in each).
+  (`ls ..`, then look for a `.git` folder in each). A repo that only holds IDL files
+  (the interfaces between processes) counts — include it.
 - Each repo gets a short id. By default it's the folder name, lower-cased (for example
   `payments-service`). Only ask about ids if two folders would end up with the same id.
 
@@ -33,57 +34,66 @@ If there's no install, clone one and install it. This needs Python 3.11+, and th
 ```bash
 git clone https://github.com/meenusinha/agentic-orchestration-framework.git ~/agentic-orchestration
 python3 -m venv ~/agentic-orchestration/.venv
-~/agentic-orchestration/.venv/bin/pip install -r ~/agentic-orchestration/requirements.txt
+~/agentic-orchestration/.venv/bin/pip install --require-hashes -r ~/agentic-orchestration/requirements.lock
 ```
 
-## 3. Decide what to index in each repo
+## 3. Scan each repo and agree on its structure
 
-The analysis is only as good as what each repo's search index contains, so agree on
-this with the developer before configuring anything. Run the read-only scanner with
-the framework venv's Python:
+Each repo becomes a **code graph**: every function, method, class, IDL operation and
+Markdown section is indexed whole, and every file gets a **role**. Run the read-only
+scanner with the framework venv's Python — it uses the indexer itself, so it shows
+exactly what will be indexed:
 
 ```bash
 ~/agentic-orchestration/.venv/bin/python <this-skill>/scripts/scan.py \
-    /abs/path/to/frontend backend=/abs/path/to/api
+    --framework ~/agentic-orchestration /abs/path/to/authd ui=/abs/path/to/ui-shell
 ```
 
-For each repo it lists doc folders, source folders, test folders, file types the index
-skips by default, and the current settings if the repo is already connected. It ends
-with suggested `configure.py` flags. Turn that into a short plan per repo and show it to
-the developer, for example:
+For each repo it reports languages, build files and the **processes and libraries**
+they build (Makefiles, `compile_commands.json`, CMake — read, never executed), IDL
+interfaces, generated code, the **proposed role of every top-level folder**, and any
+**unknown file types**. Show the developer a short summary per repo, for example:
 
-| frontend | Indexed |
+| authd | |
 |---|---|
-| Docs | `./knowledge`, `./docs` (12 .md) |
-| Code | `./packages/*/src`, `./apps/*/src` (.ts, .tsx) |
-| Extra types | `.vue` |
-| Left out | `./tests`, `docs/legacy.rst` (not .md) |
+| Processes | `authd` (executable), `libpwdpolicy.a` (library) |
+| IDL | uses `Auth::IPasswordService` (defined in ipc-interfaces) |
+| Roles | `include/` interface · `src/`, `policy/` implementation · `gen/` generated · `tests/` test (evidence only) · `third_party/` external (signatures only) |
+| Unknown types | `.pc` (looks like code), `.xidl` (looks like an IDL dialect) |
 
-Ask what they want to change, and apply their judgement on top of the scan:
+Then:
 
-- **Include** folders that explain behaviour: architecture docs, ADRs, API specs, and
-  the main application and library code.
-- **Leave out** tests (unless they are the best record of behaviour), generated code,
-  migrations, fixtures, sample data and vendored code. These add noise that pushes
-  real answers out of the top results.
+- **Ask about every unknown file type.** The scan shows what each looks like (an
+  IDL-like interface file, source code, configuration, docs). Ask the developer what
+  the files contain and how they should be read, and record each answer as a
+  `--file-type` flag:
 
-The indexer has some hard limits, so steer around them:
+  | Developer says | Flag |
+  |---|---|
+  | "Our in-house IDL" | `--file-type 'name=.xidl:interface:idl'` |
+  | "Pro*C — it's C with embedded SQL" | `--file-type 'name=.pc:implementation:c'` |
+  | "Server configuration" | `--file-type 'name=.xcfg:server-config:text'` |
+  | "Generated, ignore it" | `--file-type 'name=.tmp:ignore'` |
 
-- **Only `.md` files are read as docs, and every `README.md` is skipped.** Important
-  content in a README, or in `.rst` or `.adoc` files, needs to be summarised or
-  converted into a `.md` file under `knowledge/` (see step 6).
-- **Folders are read recursively with no exclusions.** Never use the repo root (`.`), or
-  any folder the scan marks ✗ because it contains `node_modules/`, build output or a
-  venv. Use the narrower paths or `*/src` globs the scan suggests instead.
-- **Keep doc folders separate.** Don't list a folder together with one of its
-  subfolders (for example `./docs` and `./docs/api`), or the same files are indexed
-  twice.
+  `parse_as` is one of: c, cpp, python, idl, perl, matlab, java, javascript,
+  typescript, go, rust, csharp, markdown, text. Never guess the language for code —
+  ask. `configure.py` refuses to run while any unknown type is unanswered.
+- **Ask the developer to confirm the folder roles**, and record corrections with
+  `--role`: `--role 'name=vendor_libs/**:external:signatures'`,
+  `--role 'name=api/**:interface'`. Roles: interface, implementation, internal,
+  external, library, test, build, generated, docs, tooling, config, data, example.
+  `external` code is indexed as signatures only; tests are indexed only as evidence.
+
+Index the whole repo (`--src name=.`) — the indexer skips dependencies, build output,
+virtual environments and caches by itself, and roles keep tests, generated and vendored
+code out of the results.
 
 ## 4. Get the embedding model
 
-The search index needs the `all-MiniLM-L6-v2` embedding model in
-`<framework>/models/all-MiniLM-L6-v2/`. If it's already there, skip this step.
-Otherwise, see what's already on the machine:
+The index needs the approved embedding model,
+`ibm-granite/granite-embedding-small-english-r2` (pinned revision and weights hash), in
+`<framework>/models/granite-embedding-small-english-r2/`. If it's already there, skip
+this step. Otherwise, see what's already on the machine:
 
 ```bash
 ~/agentic-orchestration/.venv/bin/python <this-skill>/scripts/configure.py \
@@ -95,9 +105,11 @@ the command found (for example in the Hugging Face cache), and ask whether they 
 one somewhere else, such as a shared drive on an offline machine.
 
 - **They have a copy:** use `--model-from <path>` in the next step. The script checks
-  it's a complete all-MiniLM-L6-v2 before copying it.
-- **They don't:** ask for permission to download it (about 90 MB from Hugging Face).
-  Use `--download-model` only after they say yes.
+  the weights' SHA-256 against the approved one and copies only the needed safetensors
+  and JSON files, never code or pickle files. Copies of other models, including the
+  older `all-MiniLM-L6-v2`, are refused.
+- **They don't:** ask for permission to download it (about 95 MB from Hugging Face, at
+  the pinned revision). Use `--download-model` only after they say yes.
 
 `configure.py` never downloads without `--download-model`. If neither flag is given
 and the model is missing, it stops before changing anything and lists the copies it
@@ -105,64 +117,62 @@ found.
 
 ## 5. Configure every repo in one command
 
-Run `configure.py` from this skill's `scripts/` folder with the **framework venv's
-Python**, passing the agreed plan as flags. That way the generated MCP configs point at
-an interpreter that has the dependencies installed. Keep glob values quoted, as the
-scan prints them, so the shell doesn't expand them.
+Run `configure.py` with the **framework venv's Python**, passing the agreed answers.
+Keep the quotes the scan printed, so the shell doesn't expand globs.
 
 ```bash
 ~/agentic-orchestration/.venv/bin/python <this-skill>/scripts/configure.py \
     --framework ~/agentic-orchestration --model-from <path-from-step-4> \
-    --repo /abs/path/to/frontend \
-      --src 'frontend=./packages/*/src' --knowledge frontend=./docs --ext frontend=.vue \
-    --repo backend=/abs/path/to/api \
-      --src backend=./app --knowledge backend=./adr
+    --repo ipc-interfaces=/abs/path/to/ipc-interfaces --src ipc-interfaces=. \
+    --repo authd=/abs/path/to/authd --src authd=. \
+      --role 'authd=third_party/**:external:signatures' \
+    --repo ui-shell=/abs/path/to/ui-shell --src ui-shell=. \
+      --file-type 'ui-shell=.xidl:interface:idl' --file-type 'ui-shell=.pc:implementation:c'
 ```
 
 The script:
 
-- copies (`--model-from`) or downloads (`--download-model`) the embedding model if
-  it's missing
-- adds the repos to `orchestrator/mcp/config.yaml`, and drops the template's
-  placeholder repos
-- copies `mcp/` and `knowledge/` into each repo, then writes `repo_name`,
-  `display_name` and the indexing settings into that repo's `mcp/config.yaml`
+- refuses to start while any repo has unclassified file types, or the model is missing
+  without `--model-from` / `--download-model`
+- copies or downloads the embedding model if it's missing
+- adds the repos to `orchestrator/mcp/config.yaml`
+- copies the repo agent (`mcp/`, including its `codegraph/` package) and `knowledge/`
+  into each repo, and writes `repo_name`, the paths, `file_types` and `structure` into
+  that repo's `mcp/config.yaml`
 - runs `orchestrator/setup.py`, which writes `.mcp.json`, `.cursor/mcp.json`,
-  `.vscode/mcp.json`, the Copilot instructions and this skill into every repo
+  `.vscode/mcp.json`, the Copilot instructions and this skill into every repo, tells
+  every server which repos are connected (so IDL interfaces can be followed across
+  them), and adds `.rag_index/` to each git repo's `.gitignore`
 
-The indexing flags are per repo, use the repo's id, and can be repeated:
+Flags are per repo, use the repo's id, and can be repeated:
 
-| Flag | Sets | Notes |
-|---|---|---|
-| `--src name=PATH` | `src_path` | Folder or quoted glob. `name=null` turns off code indexing. |
-| `--knowledge name=PATH` | `knowledge_path` | Extra `.md` doc folders. `./knowledge` is always kept. |
-| `--ext name=.EXT` | `extra_extensions` | Extra file types to index as code. `name=null` clears them. |
+| Flag | Sets |
+|---|---|
+| `--src name=PATH` | folders to index (`.` = the whole repo, recommended) |
+| `--knowledge name=PATH` | extra doc folders (Markdown anywhere under `--src` is already indexed) |
+| `--file-type name=.EXT:KIND[:PARSE_AS]` | the developer's answer for an unknown file type |
+| `--role name=GLOB:ROLE[:INDEX]` | a folder-role correction for the structure manifest |
 
-A repo with no flags keeps its current settings. A new repo with no `--src` gets a
-guessed source folder. If a repo's indexing settings change, the script deletes its
-`.chroma_db/` cache so the index is rebuilt on the next query.
-
-Check the script's summary line for each repo against the agreed plan.
+A repo with no flags keeps its current settings. When settings change, the graph
+rebuilds itself on the next start and reuses its cached embeddings.
 
 The script refuses to touch a repo that already has an unrelated `mcp/` folder. If
 that happens, explain the clash and let the developer decide what to do.
 
-## 6. Seed the knowledge docs
+## 6. Seed the docs (optional)
 
-Retrieval is only as good as each repo's `.md` docs. For every repo with 0 knowledge
-docs, or whose key docs are in a README or a non-`.md` format, offer to draft a starter
-`knowledge/architecture.md`, then do it if they agree. Read the repo's README,
-top-level layout and main entry points, and write down what's actually there:
+All Markdown in a repo — READMEs included — is indexed by heading section. For a repo
+with little documentation, offer to draft `knowledge/architecture.md` and do it if they
+agree. Read the repo's README, layout, build files and main entry points, and write
+what's actually there:
 
-- what the repo does
+- what the repo does, and which processes it builds
 - its main components, and where they live
-- the APIs, events or schemas it exposes or consumes, and which other repos it talks to
+- the IDL interfaces it defines, serves or calls, and which repos are on the other side
 
-Use concrete names: endpoints, class names, file paths. Those are what the search
-matches on. Then suggest the developer review the draft.
-
-New docs are only picked up once the index is rebuilt. If the repo already has a
-`.chroma_db/` folder, delete it after seeding.
+Use concrete names: class names, functions, interfaces, file paths. Suggest the
+developer review the draft. Never put real secrets in drafted docs (the indexer
+redacts secret-looking values, but it's better if they're never there).
 
 ## 7. Load the servers
 
@@ -177,28 +187,32 @@ The agent only loads MCP servers when it starts. Tell the developer to:
   `/cross-repo-feature-analysis`, because small auto-selected models may otherwise
   skip the MCP tools.
 
-After the restart, the feature request can go through the normal workflow. The first
-query in each repo is slow (10–60 s) while its search index is built.
+Start the servers of repos that define IDL interfaces first if you can: each repo
+publishes its interfaces when its graph is built, and the others link to them (links
+are re-resolved automatically once a peer publishes). The first start of each repo
+takes longest while its graph is built and embedded.
 
 ## Later changes
 
-- **Add a repo**: run `scan.py` on it, then re-run `configure.py` with only the new
-  `--repo` and its indexing flags. Existing repos keep their settings, and every repo's
-  config is regenerated to include the new peer.
-- **Change what a repo indexes**: re-run `configure.py` with that repo's `--repo` and
-  the new `--src`, `--knowledge` or `--ext` flags. Each flag type you pass replaces that
-  setting in full. The cache is cleared automatically.
-- **Docs or code changed a lot**: delete `.chroma_db/` in that repo. The index is
-  rebuilt on the next query.
-- **Each repo gets a `.chroma_db/` index folder.** Suggest adding it to that repo's
-  `.gitignore`.
+- **Add a repo**: scan it, ask about its unknown file types and roles, then re-run
+  `configure.py` with only the new `--repo` and its flags. Every repo's config is
+  regenerated to include the new peer.
+- **Change roles or file types**: re-run `configure.py` with that repo's `--repo` and
+  the new `--role` / `--file-type` flags. The graph rebuilds on next start.
+- **Code or docs changed**: nothing to do — each server checks for changed files at
+  most once a minute and rebuilds, re-embedding only what changed.
+- **Upgrading from an older version**: old `.chroma_db/` folders are no longer used and
+  can be deleted.
 
 ## Troubleshooting
 
 - **`ModuleNotFoundError` when a server starts**: the configs point at the wrong
   Python. Re-run `configure.py` with the framework venv's Python.
-- **A repo returns nothing relevant**: run `scan.py` on it and compare with its
-  `mcp/config.yaml`. Usually the docs aren't in `.md`, they're in a README, or
-  `src_path` points at the wrong folder.
-- **Answers are full of irrelevant code**: the index includes tests, generated code
-  or vendored code. Narrow `--src` and re-run `configure.py`.
+- **An interface shows no providers or consumers**: start (or restart) the servers of
+  the repos involved so they publish their links; check that the server repo was
+  connected; for code that reaches the interface in an unusual way, see whether
+  `find_references` shows the call.
+- **A repo returns nothing relevant**: run `scan.py` on it — check for unknown file
+  types that were set to `ignore` and for folders with the wrong role.
+- **Results full of vendored or generated code**: give those folders the `external` or
+  `generated` role with `--role`.

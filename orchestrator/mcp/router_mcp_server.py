@@ -14,7 +14,7 @@ sys.path.insert(0, str(Path(__file__).parent))
 import yaml
 from mcp.server.fastmcp import FastMCP
 from router import OrchestratorRouter
-from demo_logger import log
+from demo_logger import log, content
 
 CONFIG_PATH = Path(__file__).parent / "config.yaml"
 with open(CONFIG_PATH) as f:
@@ -36,7 +36,7 @@ def get_relevant_repos(requesting_repo: str, feature_description: str) -> str:
     Call this FIRST before querying individual repo MCP servers.
     """
     log("orchestrator_router", "TOOL_CALL", f"get_relevant_repos from '{requesting_repo}'")
-    log("orchestrator_router", "TOOL_CALL", f"Feature: {feature_description[:80]}")
+    log("orchestrator_router", "TOOL_CALL", f"Feature: {content(feature_description[:80])}")
 
     targets, all_scores = router.get_relevant_repos(requesting_repo, feature_description, top_k=2)
 
@@ -46,13 +46,15 @@ def get_relevant_repos(requesting_repo: str, feature_description: str) -> str:
         "",
         "Relevant repos (by RAG content relevance):",
     ]
-    for name, score in sorted(all_scores.items(), key=lambda x: x[1], reverse=True):
+    reasons = getattr(router, "last_reasons", {})
+    for name, score in sorted(all_scores.items(), key=lambda x: (x[0] not in targets, -x[1])):
         marker = "★" if name in targets else "·"
-        lines.append(f"  {marker} {_repo_display.get(name, name):25s} — score: {score:.3f}")
+        why = "; ".join(reasons.get(name, []))
+        lines.append(f"  {marker} {_repo_display.get(name, name):25s} — score: {score:.3f}" + (f" — {why}" if why else ""))
 
     lines += [
         "",
-        "Consult these repos next using their query_repo MCP tools:",
+        "Consult these repos next (query_repo, or search_code / trace_interface for structured results):",
         *[f"  • {_repo_display.get(t, t)}" for t in targets],
     ]
     result = "\n".join(lines)

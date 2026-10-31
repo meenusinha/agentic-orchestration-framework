@@ -1,0 +1,32 @@
+name: security
+
+on:
+  push:
+  pull_request:
+  schedule:
+    - cron: "0 6 * * 1"   # weekly: new advisories appear for unchanged pins
+
+permissions:
+  contents: read
+
+jobs:
+  dependencies:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - name: Install from hash-locked requirements
+        run: pip install --require-hashes -r requirements.lock
+      - name: Audit for known vulnerabilities
+        run: |
+          pip install pip-audit
+          pip-audit -r requirements.lock --require-hashes --disable-pip
+      - name: Lock file matches requirements.txt
+        run: |
+          pip install uv
+          cp requirements.lock /tmp/requirements.lock   # existing pins are kept as preferences
+          uv pip compile requirements.txt --universal --python-version 3.11 \
+            --generate-hashes --no-header -o /tmp/requirements.lock -q
+          diff -u requirements.lock /tmp/requirements.lock

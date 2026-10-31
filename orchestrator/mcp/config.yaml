@@ -4,7 +4,7 @@
 #   1. Fill in the repos list below (one entry per repo you want to orchestrate)
 #   2. Run:  python orchestrator/setup.py
 #   3. Open each repo in VS Code — MCP servers are ready
-#   4. Watch logs:  tail -f /tmp/mcp-orchestration.log
+#   4. Watch logs:  tail -f ~/.agentic-orchestration/logs/mcp-orchestration.log
 
 repos:
   - name: repo-one                        # unique identifier (no spaces, matches repo-agent config.yaml)
@@ -20,5 +20,9 @@ repos:
   #   display_name: Repo Three
   #   path: /absolute/path/to/repo-three
 
-# Log file — update this to a path you prefer, then tail -f it in a terminal
-log_file: /tmp/mcp-orchestration.log
+# Log file — private (0600) per-user location by default; tail -f it in a terminal
+log_file: ~/.agentic-orchestration/logs/mcp-orchestration.log
+
+# Include code/doc snippets and feature-request text in the logs (demos only).
+# Off by default so logs never hold source code.
+log_content: false

@@ -1,7 +1,6 @@
 # Repo agent configuration — the ONLY file you edit per repo.
-#
-# After editing, run:  python ../orchestrator/setup.py
-# (That generates the .vscode/mcp.json with all peer servers wired up.)
+# The guided setup (skills/cross-repo-feature-analysis/scripts/configure.py) fills it in.
+# After editing by hand, run:  python <framework>/orchestrator/setup.py
 
 # Must match the name used in orchestrator/mcp/config.yaml
 repo_name: my-repo
@@ -9,38 +8,35 @@ repo_name: my-repo
 # Human-readable name shown in routing output and Copilot chat
 display_name: My Repo
 
-# Path(s) to source code to index. Relative to repo root, absolute, or a glob pattern.
-# Glob example (all src folders under module subdirectories): src_path: ./modules/*/src
-# Multiple explicit paths:
-#   src_path:
-#     - ./module-a/src
-#     - ./module-b/src
-# Set to null to skip source indexing entirely.
-src_path: ./src
+# What to index. "." = the whole repo (recommended): dependencies, build output,
+# virtual environments and caches are skipped automatically, and folder roles keep
+# tests, generated and vendored code out of results. A path, glob or list also works:
+#   src_path: [./src, ./include, ./idl]
+src_path: .
 
-# Additional file extensions to index (on top of the defaults above)
-# extra_extensions: [".graphql", ".proto", ".thrift"]
-
-# Path(s) to documentation folders containing .md files. Supports glob patterns
-# and lists, same as src_path. All .md files are searched recursively.
-# Glob example: knowledge_path: ./modules/*/docs
-# Multiple paths:
-#   knowledge_path:
-#     - ./knowledge
-#     - ./modules/*/docs
+# Extra documentation folders outside src_path (Markdown is indexed by heading section).
 knowledge_path: ./knowledge
 
-# Number of results returned per query from docs and code collections (default: 3)
-top_k: 3
+# What unknown file types contain — the developer's answers, recorded by setup.
+#   kind:     implementation, interface, config, docs, data, … or ignore
+#   parse_as: c, cpp, python, idl, perl, matlab, java, javascript, typescript, go,
+#             rust, csharp, markdown, text
+# file_types:
+#   .xidl: {kind: interface, parse_as: idl}            # in-house IDL dialect
+#   .pc:   {kind: implementation, parse_as: c}         # Pro*C
+#   .xcfg: {kind: server-config, parse_as: text}
+file_types: {}
 
-# Similarity threshold — maximum L2 distance to accept a result (lower = tighter).
-# With normalised embeddings: ~0.5 is tight, ~1.0 is moderate, null = no filtering.
-# Keyword search always runs in addition and is unaffected by this threshold.
-similarity_threshold: null
+# Folder roles, when the automatic ones are wrong (first match wins).
+#   roles: interface, implementation, internal, external, library, test, build,
+#          generated, docs, tooling, config, data, example
+#   index: full (default), signatures (bodies omitted — e.g. vendored code), skip
+# structure:
+#   - {path: "third_party/**", role: external, index: signatures}
+#   - {path: "api/**", role: interface}
+structure: []
 
-# Chunking strategy (applied when rebuilding ChromaDB — requires cache deletion to take effect)
-# Code is split at function/class boundaries; docs are split at paragraphs.
-# Chunks larger than max_chunk_chars are further split with overlap.
-# Industry standard: 500-1500 chars per chunk, 10% overlap.
-max_chunk_chars: 1500
-chunk_overlap_chars: 150
+# Results per search, and the token budget for one answer. Units are always whole:
+# a unit that does not fit is listed under "more" (fetch with get_node), never cut.
+top_k: 5
+result_budget_tokens: 6000

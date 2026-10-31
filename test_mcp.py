@@ -28,7 +28,7 @@ sys.path.insert(0, str(FRAMEWORK_DIR / "orchestrator" / "mcp"))
 os.environ.pop("PYTHONPATH", None)
 
 # Set env vars before any subprocess calls — inherited by all spawned MCP servers
-os.environ["EMBEDDING_MODEL_PATH"] = str(FRAMEWORK_DIR / "models" / "all-MiniLM-L6-v2")
+os.environ["EMBEDDING_MODEL_PATH"] = str(FRAMEWORK_DIR / "models" / "granite-embedding-small-english-r2")
 
 try:
     import yaml
@@ -37,6 +37,7 @@ except ImportError:
     sys.exit(1)
 
 from router import _mcp_call, OrchestratorRouter
+from demo_logger import DEFAULT_LOG_FILE, open_private
 import term
 import html_log
 
@@ -55,12 +56,14 @@ if not repos:
     print("ERROR: No repos listed in orchestrator/mcp/config.yaml")
     sys.exit(1)
 
-LOG_FILE  = config.get("log_file", "/tmp/mcp-orchestration.log")
+LOG_FILE  = str(Path(config.get("log_file") or DEFAULT_LOG_FILE).expanduser())
 HTML_FILE = html_log.path_from_log(LOG_FILE)
 os.environ["DEMO_LOG_FILE"] = LOG_FILE
+os.environ["DEMO_LOG_CONTENT"] = "1" if config.get("log_content") is True else "0"
 
-# Clear both log files at the start of every run
-Path(LOG_FILE).write_text("", encoding="utf-8")
+# Clear both log files at the start of every run (private 0600 files)
+with open_private(LOG_FILE, truncate=True):
+    pass
 html_log.init(HTML_FILE)
 
 # ── Live log streaming ────────────────────────────────────────────────────────
@@ -127,16 +130,16 @@ def _preflight(script: Path) -> None:
     if proc.stdout.strip():
         print(f"  SERVER STDOUT:\n{proc.stdout.strip()[:300]}")
 
-# ── ChromaDB cache prompts ────────────────────────────────────────────────────
-print(term.c("ChromaDB cache", term.CYN) + " — keeping cache skips re-indexing:")
+# ── Index cache prompts ───────────────────────────────────────────────────────
+print(term.c("Index cache", term.CYN) + " — keeping cache skips re-indexing:")
 for repo in repos:
     name   = repo["name"]
-    chroma = _repo_path(repo) / ".chroma_db"
+    index  = _repo_path(repo) / ".rag_index"
     tag    = term.c(f"[{name}]", term.BLU)
-    if chroma.exists():
-        ans = input(f"  {tag} .chroma_db exists — delete and rebuild? {term.YEL}[y/N]{term._R} ").strip().lower()
+    if index.exists():
+        ans = input(f"  {tag} .rag_index exists — delete and rebuild? {term.YEL}[y/N]{term._R} ").strip().lower()
         if ans == "y":
-            shutil.rmtree(chroma)
+            shutil.rmtree(index)
             print(f"  {tag} {term.c('deleted', term.RED)} — will rebuild index")
         else:
             print(f"  {tag} {term.c('kept', term.GRN)} — will use cached index")

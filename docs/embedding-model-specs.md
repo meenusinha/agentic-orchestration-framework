@@ -1,5 +1,11 @@
 # Embedding Model — Parameters, Architecture & RAM
 
+> **Note:** written before the security hardening. The framework now stores its index as
+> a code graph (SQLite) in `.rag_index/` (no ChromaDB) and uses the pinned
+> `ibm-granite/granite-embedding-small-english-r2` model (384 dims, 8,192-token input)
+> instead of `all-MiniLM-L6-v2`. The process model and timing analysis still apply;
+> ChromaDB/MiniLM specifics are historical. See README → Security.
+
 Details for the default model used by every `mcp_server.py` instance:
 `all-MiniLM-L6-v2` (sentence-transformers).
 

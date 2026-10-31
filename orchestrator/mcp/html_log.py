@@ -1,5 +1,5 @@
 """Initialise and close the HTML log file written to by demo_logger.py."""
-from pathlib import Path
+from demo_logger import open_private
 
 _HEAD = """\
 <!DOCTYPE html>
@@ -76,15 +76,17 @@ _TAIL = "</div>\n</body>\n</html>\n"
 
 def init(html_path: str) -> None:
     """Write the HTML header. Called once at test_mcp.py startup."""
-    Path(html_path).write_text(_HEAD, encoding="utf-8")
+    with open_private(html_path, truncate=True) as f:
+        f.write(_HEAD)
 
 
 def close(html_path: str) -> None:
     """Append the closing tags after all log entries have been written."""
-    with open(html_path, "a", encoding="utf-8") as f:
+    with open_private(html_path) as f:
         f.write(_TAIL)
 
 
 def path_from_log(log_path: str) -> str:
     """Derive the HTML file path from the plain-text log file path."""
-    return log_path.rsplit(".", 1)[0] + ".html" if "." in log_path else log_path + ".html"
+    import os
+    return log_path.rsplit(".", 1)[0] + ".html" if "." in os.path.basename(log_path) else log_path + ".html"

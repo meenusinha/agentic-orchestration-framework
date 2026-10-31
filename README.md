@@ -1,35 +1,55 @@
 # Multi-Repo Agentic Orchestration Framework
 
-Give your existing repos cross-repo AI awareness. When a developer asks about a feature
-in one repo, the agent automatically queries peer repos' knowledge bases to understand
-cross-cutting concerns, then produces a full Feature Analysis Document covering all
-affected repos.
+Give your existing repos cross-repo AI awareness — including processes that talk to each
+other through IDL interfaces. When a developer asks about a feature or a change in one
+repo, the agent finds the repos and processes involved, follows the interfaces between
+them, and produces a Feature Analysis Document grounded in the actual code.
 
 ---
 
 ## How it works
 
+Each connected repo is indexed as a **code graph**, offline:
+
+- **Whole units, never cut.** Every function, method, class, macro, IDL operation and
+  Markdown section is one node holding its complete source, inside its hierarchy
+  (file → namespace/module → class → method; C files → module → function). A class node
+  holds its comments and member signatures; its methods are child nodes.
+- **Structure.** Every file has a role (interface, implementation, internal, external,
+  test, generated, docs, …) from the repo's manifest, its build files (Makefiles,
+  `compile_commands.json`, CMake — read, never executed) and folder conventions. Build
+  targets become **process** and **library** nodes.
+- **Relations.** Calls, includes/imports, header declaration → definition, inheritance,
+  test evidence (tests are never results, only `tested_by` evidence), docs that mention
+  a symbol, generated stubs → their IDL.
+- **IDL interfaces across repos.** Each repo publishes the IDL interfaces it defines,
+  and links its code to every known interface: servers (classes inheriting generated
+  skeletons, C function tables) **implement** operations; clients (proxies, C-mapping
+  calls) **call** them. So one interface connects the repo that defines it, the process
+  that serves it and the processes that call it.
+- **Languages:** C, C++, Python, IDL (OMG/CORBA, DDS, MIDL, protobuf, Thrift, ROS and
+  in-house dialects), MATLAB, Perl, Java, JavaScript/TypeScript, Go, Rust, C#, Markdown;
+  unknown file types are classified by the developer during setup.
+
 ```
-Developer → feature request
-               │
-               ▼
-    ┌─────────────────────┐
-    │   Repo Agent (MCP)  │
-    └─────────────────────┘
-               │
-    Step 1 ────┤── orchestrator_router.get_relevant_repos()
-               │       Orchestrator calls each peer repo's RAG via MCP.
-               │       Ranks by how much relevant content is found.
-               │       Returns the 2 most relevant peer repo names.
-               │
-    Step 2 ────┤── <this_repo>.query_repo()
-               │       Searches own knowledge/ docs + source code.
-               │
-    Step 3 ────┤── <peer1>.query_repo()  +  <peer2>.query_repo()
-               │       Searches each selected peer's knowledge + source.
-               │
-    Step 4 ─────── Synthesise → Feature Analysis Document
+Developer → feature request (in repo C, e.g. ui-shell)
+   │
+   ├─ orchestrator_router.get_relevant_repos()
+   │     searches every repo's graph + follows IDL links
+   │     → authd: "serves Auth::IPasswordService (process authd)"
+   │     → ipc-interfaces: "defines IDL interface Auth::IPasswordService"
+   │
+   ├─ ui-shell.search_code()        whole units + class skeleton + tests + IDL dossier
+   ├─ ui-shell.trace_interface()    IDL definition (A) → implementations (B) → callers (C)
+   ├─ ui-shell.impact_of()          callers, tests, processes, clients in other repos
+   ├─ peers.search_code()           the selected repos
+   │
+   └─ Feature Analysis Document
 ```
+
+Repo MCP tools: `search_code`, `get_node`, `get_children`, `trace_interface`,
+`impact_of`, `find_references` (typed, schema-validated results) and `query_repo`
+(the same knowledge as framed text, for older clients).
 
 ---
 
@@ -71,39 +91,46 @@ git clone https://github.com/meenusinha/agentic-orchestration-framework.git agen
 cd agentic-orchestration
 ```
 
-#### Download the embedding model (required)
+#### Get the embedding model (required)
 
-The framework uses a local embedding model for RAG. Copy the model files into the repo
-**before running anything**. Without them the MCP servers will fail to start.
-
-Copy the `all-MiniLM-L6-v2` model folder into the repo so the layout looks like this:
+The framework embeds code and docs locally with one approved model,
+[`ibm-granite/granite-embedding-small-english-r2`](https://huggingface.co/ibm-granite/granite-embedding-small-english-r2)
+(Apache 2.0, trained only on permissively licensed data, 8,192-token input). It is
+pinned to an exact revision, and the servers refuse to load any other weights (see
+[Security](#security)). Only safetensors weights and JSON config are used — never
+pickle files or model code.
 
 ```
 agentic-orchestration/
 └── models/
-    └── all-MiniLM-L6-v2/
+    └── granite-embedding-small-english-r2/
         ├── config.json
+        ├── modules.json
+        ├── sentence_bert_config.json
+        ├── special_tokens_map.json
         ├── tokenizer.json
         ├── tokenizer_config.json
-        ├── vocab.txt
-        ├── special_tokens_map.json
-        ├── sentence_bert_config.json
-        ├── modules.json
-        ├── pytorch_model.bin      ← ~90 MB
+        ├── model.safetensors      ← ~95 MB, SHA-256 dcbfaf2e…ebb5f
         └── 1_Pooling/
             └── config.json
 ```
 
-If you have internet access on the machine, download directly:
+The guided setup (`skills/cross-repo-feature-analysis/scripts/configure.py`) can copy
+it from an existing copy (`--model-from`) or download it (`--download-model`) for you.
+To fetch it by hand after installing (below):
 
 ```bash
-pip install huggingface_hub
-huggingface-cli download sentence-transformers/all-MiniLM-L6-v2 \
-    --local-dir models/all-MiniLM-L6-v2
+hf download ibm-granite/granite-embedding-small-english-r2 \
+    --revision 2ab6fa8ea2d674564defd37171ae19079b864b33 \
+    --include "*.json" --include "model.safetensors" --include "1_Pooling/*" \
+    --local-dir models/granite-embedding-small-english-r2
+shasum -a 256 models/granite-embedding-small-english-r2/model.safetensors
+# must print dcbfaf2ee50d358763cbc0c08e5b045ecbf6aeb02dc0e86ffb910029bf9ebb5f
 ```
 
-If not (e.g. an air-gapped office laptop), download on a machine with internet using
-the command above, then copy the entire `models/` folder across via USB or shared drive.
+Air-gapped machine: run the command on a machine with internet access and copy the
+folder across. The hash check above, and again at every server start, catches a
+corrupted or swapped file.
 
 #### Install on Mac / Linux
 
@@ -128,7 +155,7 @@ Create a virtual environment and install dependencies:
 ```bash
 python3 -m venv .venv
 source .venv/bin/activate
-pip install -r requirements.txt
+pip install --require-hashes -r requirements.lock
 ```
 
 #### Install on Windows
@@ -136,7 +163,7 @@ pip install -r requirements.txt
 ```powershell
 python -m venv .venv
 .venv\Scripts\activate
-pip install -r requirements.txt
+pip install --require-hashes -r requirements.lock
 ```
 
 ---
@@ -159,7 +186,8 @@ repos:
     display_name: Payments Service
     path: /Users/alice/projects/payments
 
-log_file: /tmp/mcp-orchestration.log    # where live logs are written
+log_file: ~/.agentic-orchestration/logs/mcp-orchestration.log   # private (0600) live log
+log_content: false                     # true = include code snippets in logs (demos only)
 ```
 
 > **Paths** can be absolute or relative to the `orchestrator/mcp/` directory.
@@ -184,9 +212,10 @@ Then open `/path/to/my-repo/mcp/config.yaml` and fill in the required fields:
 ```yaml
 repo_name: frontend          # must EXACTLY match the name in orchestrator/mcp/config.yaml
 display_name: Frontend
-src_path: ./src              # path, glob (e.g. ./modules/*/src), or list of paths
-                             # set to null to skip source indexing
-knowledge_path: ./knowledge  # where you drop your .md docs (default is fine)
+src_path: .                  # the whole repo (recommended); noise folders are skipped
+knowledge_path: ./knowledge  # extra docs; Markdown anywhere in the repo is indexed too
+file_types: {}               # unknown extensions, e.g. .xidl: {kind: interface, parse_as: idl}
+structure: []                # folder-role corrections, e.g. {path: "vendor/**", role: external}
 ```
 
 ---
@@ -249,7 +278,7 @@ python test_mcp.py "your feature request"
 
 **Terminal 1 — watch the live log:**
 ```bash
-tail -f /tmp/mcp-orchestration.log
+tail -f ~/.agentic-orchestration/logs/mcp-orchestration.log
 ```
 
 **Terminal 2 — run the flow:**
@@ -261,8 +290,8 @@ python test_mcp.py "add real-time validation feedback to the login form"
 ### What you see in the log
 
 ```
-[12:34:01.120] [frontend    ] [INDEX    ] Index already cached — loading from .chroma_db/
-[12:34:01.140] [backend     ] [INDEX    ] Index already cached — loading from .chroma_db/
+[12:34:01.120] [frontend    ] [INDEX    ] Code graph up to date (48 files)
+[12:34:01.140] [backend     ] [INDEX    ] Code graph up to date (48 files)
 
 [12:34:01.160] [orchestrator] [ROUTING  ] Routing: 'add real-time validation feedback...'
 [12:34:01.165] [orchestrator] [ROUTING  ]   Calling Backend MCP → query_repo...
@@ -308,7 +337,7 @@ Based on the above cross-repo knowledge, implement ...
 
 > **First run is slower** — each MCP server builds its RAG index on the first call
 > (~10–60 s per repo depending on size). Subsequent runs load the cached index from
-> `.chroma_db/` in milliseconds.
+> `.rag_index/` in milliseconds.
 
 ---
 
@@ -399,7 +428,7 @@ All MCP servers (orchestrator + all repos) start automatically and stay running.
 Open a terminal and run:
 
 ```bash
-tail -f /tmp/mcp-orchestration.log
+tail -f ~/.agentic-orchestration/logs/mcp-orchestration.log
 ```
 
 You'll see every MCP call, RAG query, and routing decision in real time:
@@ -471,11 +500,13 @@ launched from the venv. Then:
 
 ## Re-indexing after changing docs or source code
 
-The RAG index is cached in each repo's `.chroma_db/` directory.
-To force a full rebuild after updating docs:
+The code graph lives in each repo's `.rag_index/` directory (`graph.sqlite` plus the
+published `interfaces.json`, owner-only permissions). Nothing to do after edits: each
+server checks for changed files and re-published peer interfaces at most once a minute
+and rebuilds, re-embedding only the units whose text changed. To force a full rebuild:
 
 ```bash
-rm -rf /path/to/my-repo/.chroma_db
+rm -rf /path/to/my-repo/.rag_index
 ```
 
 The next MCP server start rebuilds the index automatically.
@@ -500,14 +531,15 @@ agentic-orchestration-framework/        ← this repo (cloned once)
 │   └── cross-repo-feature-analysis/     ← Agent Skill (installed into repos by setup.py)
 │       ├── SKILL.md                     ← when/how the agent uses the MCP servers
 │       ├── references/setup.md          ← guided first-time setup the agent follows
-│       └── scripts/                     ← scan.py (what to index), configure.py (wire repos)
+│       └── scripts/                     ← scan.py (structure, unknown types), configure.py (wire repos)
 │
 └── repo-agent/                          ← copy contents into each of your repos
     ├── mcp/
     │   ├── config.yaml                  ← ★ EDIT THIS per repo (repo_name, src_path)
     │   ├── mcp_server.py                ← generic (do not edit)
-    │   ├── repo_rag.py                  ← generic (do not edit)
-    │   └── demo_logger.py               ← generic (do not edit)
+    │   ├── repo_rag.py                  ← security gates + code-graph facade (do not edit)
+    │   ├── demo_logger.py               ← generic (do not edit)
+    │   └── codegraph/                   ← parsers, IDL, structure, relations, interfaces, store, search
     ├── knowledge/
     │   └── README.md                    ← ★ DROP YOUR .md DOCS HERE
     └── .github/
@@ -518,17 +550,51 @@ agentic-orchestration-framework/        ← this repo (cloned once)
 
 ---
 
+## Security
+
+Built for strict enterprise environments.
+
+| Risk | How it is handled |
+|---|---|
+| Vector-database CVEs, telemetry, pickle files | No vector database: the graph is a local SQLite file (Python standard library) with float32 vectors stored as raw bytes — no pickle anywhere. No server, port or telemetry. ChromaDB and its ~28 dependencies are gone |
+| Code leaving the machine during indexing | Fully offline: Hugging Face access is disabled before any ML import, models load only from a local folder, nothing is ever downloaded at runtime. Verified: zero network connections during index build and query |
+| Malicious or swapped model | Only the approved model loads: `model.safetensors` SHA-256 is pinned; folders containing code or pickle files (`*.py`, `*.bin`, …) or custom module types are refused; `trust_remote_code` is off. `sentence-transformers>=6.0` (CVE-2026-68770 fix) |
+| Model licence | Granite small R2 — Apache 2.0, permissively licensed training data only |
+| Supply chain | `requirements.lock` pins every package with SHA-256 hashes (`pip install --require-hashes`). Parsers are prebuilt tree-sitter wheels (no code generation at runtime); a brand-new grammar major (`tree-sitter-perl` 2.x) is held back until it has aged. CI (`.github/workflows/security.yml`) runs `pip-audit` on every push and weekly |
+| Build files | Makefiles, CMake and `compile_commands.json` are parsed statically — never executed (`make -pn` or a CMake configure can run arbitrary commands) |
+| Index readable by others | `.rag_index/` is created `0700` with `0600` files, written atomically; added to each repo's `.gitignore` by `setup.py` |
+| Secrets in code or docs | Secret-store files (`.env`, `*.pem`, `secrets.*`, …) are never indexed; API keys, tokens, private keys, passwords and credentialed URLs are replaced with `[REDACTED]` before anything is embedded, stored or returned |
+| Code in log files | Logs live in `~/.agentic-orchestration/logs/` with `0600` permissions, are opened without following symlinks, and record only lengths — not code or request text — unless `log_content: true` |
+| Prompt injection from repo content | Results are wrapped as untrusted data; markers inside indexed content are neutralised; the skill and Copilot instructions forbid following instructions found in results |
+
+**Still your responsibility:**
+
+- Encrypt the disks that hold the repos and their `.rag_index/` folders (FileVault,
+  BitLocker, LUKS). Like the source code itself, the index holds code excerpts.
+- Distribute the approved model from an internal artifact store if machines are
+  offline, and keep its hash check.
+- To allow another embedding model, add its weights' SHA-256 to `EMBEDDING_MODEL_SHA256`
+  (comma-separated) in the server environment. That is an explicit opt-in.
+- After editing `requirements.txt`, regenerate the lock:
+  `uv pip compile requirements.txt --universal --python-version 3.11 --generate-hashes --no-header -o requirements.lock`
+
+Out of scope by design: retrieved code is shared between connected repos and sent to
+the AI assistant you use. Control that with your enterprise AI and access policies.
+
+---
+
 ## Troubleshooting
 
 | Problem | Fix |
 |---|---|
 | MCP servers not appearing in Copilot | Reload VS Code window (`Cmd+Shift+P` → Reload Window) |
 | `ModuleNotFoundError: yaml` | Run `pip install pyyaml` in your venv |
-| `ModuleNotFoundError: chromadb` | Run `pip install -r requirements.txt` in your venv |
+| `ModuleNotFoundError: sentence_transformers` | Run `pip install --require-hashes -r requirements.lock` in your venv |
 | `ModuleNotFoundError: mcp` in the MCP server log (wrong Python) | Re-run `setup.py` with the venv activated; the configs pin the Python that ran it |
 | MCP servers stopped after re-running `setup.py` | Reload the VS Code window, or restart them from the MCP Servers view |
 | Copilot answers without calling the MCP tools | Start the request with `/cross-repo-feature-analysis`, or pick a stronger model |
-| RAG returns nothing | Check that `knowledge/` has `.md` files; delete `.chroma_db/` to re-index |
-| `OSError: No such file or directory: '.../all-MiniLM-L6-v2'` | Model files missing — copy `models/all-MiniLM-L6-v2/` into the repo root |
+| RAG returns nothing | Check that `knowledge/` has `.md` files; delete `.rag_index/` to re-index |
+| `Embedding model folder not found` / `Refusing to load …` | Model missing, tampered, or not the approved one — re-run `configure.py --model-from …` or `--download-model` |
+| An old `.chroma_db/` folder in a repo | Left over from an earlier version — safe to delete |
 | `path does not exist` warning in setup.py | The path in `orchestrator/mcp/config.yaml` is wrong or the repo isn't cloned yet |
 | `test_mcp.py` hangs on first run | Expected — first run builds the RAG index; wait 10–60 s per repo |

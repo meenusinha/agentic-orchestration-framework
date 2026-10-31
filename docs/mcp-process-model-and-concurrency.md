@@ -1,5 +1,11 @@
 # MCP Process Model & Shared Resource Concurrency
 
+> **Note:** written before the security hardening. The framework now stores its index as
+> a code graph (SQLite) in `.rag_index/` (no ChromaDB) and uses the pinned
+> `ibm-granite/granite-embedding-small-english-r2` model (384 dims, 8,192-token input)
+> instead of `all-MiniLM-L6-v2`. The process model and timing analysis still apply;
+> ChromaDB/MiniLM specifics are historical. See README → Security.
+
 How processes are spawned, how they communicate, and what protects shared resources
 when multiple VS Code sessions run against the same repos on the same machine.
 

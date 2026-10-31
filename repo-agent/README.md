@@ -45,8 +45,9 @@ knowledge/
 
 ## Re-indexing
 
-Delete `.chroma_db/` to force a full rebuild on next MCP server start:
+The index (`.rag_index/`, private to your user) rebuilds automatically when the
+model, chunking or indexed paths change. To force a rebuild after editing docs or code:
 
 ```bash
-rm -rf .chroma_db/
+rm -rf .rag_index/
 ```
