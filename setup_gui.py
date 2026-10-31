@@ -218,10 +218,16 @@ def job_install(job):
 
 def job_model(body):
     def run(job):
-        flags = ["--download-model"] if body.get("mode") == "download" else ["--model-from", body.get("path", "")]
-        rc = stream(job, [sys.executable, SCRIPTS / "configure.py", "--framework", FW, "--model-only", *flags])
+        path = str(body.get("path", "")).strip()
+        if not path:
+            raise RuntimeError("choose the folder that holds the model")
+        # copy only — the GUI never downloads; the copy is checked against the pinned SHA-256
+        rc = stream(job, [sys.executable, SCRIPTS / "configure.py", "--framework", FW, "--model-only",
+                          "--model-from", path])
         if rc != 0:
-            raise RuntimeError("model setup failed")
+            why = next((l for l in reversed(job.lines) if l.startswith("ERROR:")), "")
+            raise RuntimeError(why.replace("ERROR: --model-from ", "", 1).replace("ERROR: ", "", 1)
+                               or "model setup failed")
     return run
 
 

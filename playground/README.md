@@ -17,6 +17,7 @@ server calls `ISessionListener` back on the client.
 python3 setup_gui.py
 ```
 
+In step 2 (Model) point to the folder holding your copy of the model and click **Copy model**.
 In step 3 (Repositories) click **Create playground repos**, then click through the rest.
 After step 6 (Create GraphRAG), use the query field at the top, for example:
 

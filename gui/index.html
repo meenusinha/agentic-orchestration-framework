@@ -83,7 +83,7 @@ details summary{cursor:pointer;color:var(--muted);font-size:12.5px}.saved{font-s
 
     <section data-step="model">
       <h2>2. Embedding model</h2>
-      <p class="sub">The approved model <code>ibm-granite/granite-embedding-small-english-r2</code> (Apache 2.0, ~95&nbsp;MB) turns code into searchable vectors, fully offline. Every copy is checked against its pinned SHA-256.</p>
+      <p class="sub">Point to your copy of the approved model <code>ibm-granite/granite-embedding-small-english-r2</code> (Apache 2.0, ~95&nbsp;MB). It is copied into the framework and checked against its pinned SHA-256 — nothing is downloaded.</p>
       <div id="modelStatus"></div>
       <div id="modelChoices"></div>
       <div class="log" id="modelLog"></div>
@@ -199,19 +199,17 @@ function showModel() {
     $("#modelChoices").innerHTML = `<button class="primary" id="modelNext">Continue</button>`;
     $("#modelNext").onclick = () => finish("model","repos"); return;
   }
-  $("#modelStatus").innerHTML = status(false, "The model is not installed yet.");
+  $("#modelStatus").innerHTML = status(false, "The model is not copied yet.");
   const copies = (S.model_copies||[]).map(c => `<div class="cmd"><code>${esc(c)}</code><button data-copy="${esc(c)}">Use this copy</button></div>`).join("");
   $("#modelChoices").innerHTML = `
     ${copies ? `<h3 style="font-size:14px;margin:8px 0">Copies found on this computer</h3>${copies}` : ""}
-    <h3 style="font-size:14px;margin:16px 0 8px">Use a copy you already have</h3>
+    <h3 style="font-size:14px;margin:16px 0 8px">Folder that holds the model</h3>
     <div class="row"><input type="text" id="modelPath" placeholder="/path/to/granite-embedding-small-english-r2" style="flex:1;min-width:260px">
-    <button id="modelBrowse">Browse…</button><button id="modelUse">Use this folder</button></div>
-    <h3 style="font-size:14px;margin:16px 0 8px">Or download it</h3>
-    <button class="primary" id="modelDl">Download (~95 MB from Hugging Face)</button>`;
+    <button id="modelBrowse">Browse…</button><button class="primary" id="modelUse">Copy model</button></div>
+    <p class="small">The folder must contain <code>model.safetensors</code> and the model's JSON files (a Hugging Face snapshot folder works).</p>`;
   document.querySelectorAll("[data-copy]").forEach(b => b.onclick = () => installModel({mode:"copy", path:b.dataset.copy}));
   $("#modelBrowse").onclick = () => pick(p => $("#modelPath").value = p);
   $("#modelUse").onclick = () => $("#modelPath").value && installModel({mode:"copy", path:$("#modelPath").value});
-  $("#modelDl").onclick = () => installModel({mode:"download"});
 }
 async function installModel(body) {
   document.querySelectorAll("#modelChoices button").forEach(b => b.disabled = true);

@@ -18,7 +18,7 @@ python3 setup_gui.py          # Windows: py setup_gui.py
 It creates its own virtual environment (`.venv`) and opens a local page in your browser:
 
 1. **Install**: hash-verified packages into `.venv`
-2. **Model**: use a copy you have, or download it (~95 MB)
+2. **Model**: point to the folder holding your copy of the model; it is copied and hash-checked (the GUI never downloads)
 3. **Repositories**: pick folders, or create the two playground repos
 4. **Review**: the processes, IDL interfaces and folder roles the scan found; say what
    unknown file types contain
