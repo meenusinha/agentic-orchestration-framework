@@ -27,6 +27,9 @@ Score = `min(content_length / 800, 1.0)`, 0.0 if "no relevant knowledge found".
 ```
 agentic-orchestration-framework/
 ├── README.md                        ← user-facing setup guide (keep accurate)
+├── setup_gui.py                     ← local setup wizard (stdlib HTTP server, 127.0.0.1 + token) — install → model → repos → review → configure → verify
+├── gui/                             ← index.html (no external assets, CSP), verify.py (build + report)
+├── playground/                      ← setup_playground.py, smoke_test.py, two sample repos
 ├── requirements.txt                 ← direct deps: mcp[cli]<2, sentence-transformers>=6, numpy, pyyaml
 ├── requirements.lock                ← hash-locked, universal (uv pip compile --generate-hashes)
 ├── models/granite-embedding-small-english-r2/  ← approved embedding model (pinned hash)

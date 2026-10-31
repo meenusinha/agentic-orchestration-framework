@@ -376,6 +376,8 @@ def main() -> None:
                     help="copy the approved embedding model's files from an existing copy")
     ap.add_argument("--download-model", action="store_true",
                     help="download the embedding model (~95 MB, pinned revision) if it is missing")
+    ap.add_argument("--model-only", action="store_true",
+                    help="only copy (--model-from) or download (--download-model) the model, then exit")
     ap.add_argument("--find-model", action="store_true",
                     help="list usable copies of the embedding model on this machine and exit")
     ap.add_argument("--file-type", action="append", default=[], metavar="NAME=.EXT:KIND[:PARSE_AS]",
@@ -398,6 +400,13 @@ def main() -> None:
     model_from = Path(args.model_from).expanduser().resolve() if args.model_from else None
     if args.model_from and args.download_model:
         raise SystemExit("ERROR: pass either --model-from or --download-model, not both")
+
+    if args.model_only:                                 # just put the model in place (setup GUI)
+        if not (model_from or args.download_model) and _model_problem(model_dir) is not None:
+            raise SystemExit("ERROR: --model-only needs --model-from PATH or --download-model")
+        _check_model_plan(model_dir, model_from, args.download_model)
+        _ensure_model(model_dir, model_from, args.download_model)
+        return
 
     if args.find_model:
         state = "present" if _model_problem(model_dir) is None else "missing"

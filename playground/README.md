@@ -11,7 +11,15 @@ you can try the framework end to end in a few minutes.
 So links run both ways: the client calls `IPasswordService` on the server, and the
 server calls `ISessionListener` back on the client.
 
-## Run it from scratch
+## Easiest: the setup GUI
+
+```bash
+python3 setup_gui.py
+```
+
+In step 3 (Repositories) click **Create playground repos**, then click through the rest.
+
+## Run it from scratch (command line)
 
 Needs Python 3.11+ and git.
 

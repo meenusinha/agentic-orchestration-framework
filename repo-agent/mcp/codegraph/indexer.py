@@ -108,6 +108,8 @@ def collect_files(cfg: IndexConfig):
                 ext = PurePosixPath(fn).suffix.lower()
                 if ext in _BINARY_EXT:
                     continue
+                if _is_framework_file(ab):                # our own templates / generated instructions
+                    continue
                 lang = language_for(rel, cfg.file_types)
                 if not lang:
                     ft = cfg.file_types.get(ext) or cfg.file_types.get(fn)
@@ -116,6 +118,16 @@ def collect_files(cfg: IndexConfig):
                     continue
                 out.append((rel, ab, lang))
     return out, unknown, secrets
+
+
+def _is_framework_file(path: Path) -> bool:
+    if path.suffix.lower() not in (".md", ".markdown", ".txt"):
+        return False
+    try:
+        with open(path, "rb") as f:
+            return _NOT_INDEXED_MARK in f.read(400)
+    except OSError:
+        return False
 
 
 def _looks_textual(path: Path) -> bool:

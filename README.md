@@ -7,6 +7,28 @@ them, and produces a Feature Analysis Document grounded in the actual code.
 
 ---
 
+## Quick start — setup GUI (no AI agent needed)
+
+```bash
+git clone -b add-agent-skill https://github.com/meenusinha/agentic-orchestration-framework.git
+cd agentic-orchestration-framework
+python3 setup_gui.py          # Windows: py setup_gui.py
+```
+
+A local page opens in your browser and walks through six steps, a click or two each:
+**Install** (hash-verified packages into the framework's own venv) → **Model** (use a copy
+you have, or download it) → **Repositories** (pick folders, or create the two playground
+repos) → **Review** (processes, IDL interfaces and folder roles found by the scan; tell it
+what unknown file types contain) → **Configure** → **Verify** (builds every code graph and
+shows which processes serve and call each interface). It needs only Python 3.11+, uses
+the standard library until it has installed the rest, listens on 127.0.0.1 only and
+requires a per-session token.
+
+Prefer the command line? See the steps below, `playground/setup_playground.py`, or the
+agent-guided setup in `skills/cross-repo-feature-analysis/references/setup.md`.
+
+---
+
 ## How it works
 
 Each connected repo is indexed as a **code graph**, offline:

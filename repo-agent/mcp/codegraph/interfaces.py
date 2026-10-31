@@ -212,6 +212,20 @@ class Resolver:
                 link = _link(r, iface, min(1.0, conf + (0.05 if ops else 0)))
                 link["ops"] = ops
                 implements.append(link)
+                # IDL inheritance: implementing a derived interface implements its bases too
+                seen, todo = {iface["id"]}, list(iface.get("bases", []))
+                while todo:
+                    b = todo.pop()
+                    base, bconf = self.match_type(b)
+                    if base is None or base["id"] in seen:
+                        continue
+                    seen.add(base["id"])
+                    bops = {o["name"]: r.get("ops", {})[o["name"]] for o in base["operations"]
+                            if o["name"] in r.get("ops", {})}
+                    blink = _link(r, base, round(min(link["confidence"], bconf), 2))
+                    blink["ops"], blink["via"] = bops, iface["id"]
+                    implements.append(blink)
+                    todo += base.get("bases", [])
             elif k == "client":
                 iface, conf = self.match_type(r["type"])
                 if iface is not None and any(o["name"] == r["op"] for o in iface["operations"]):

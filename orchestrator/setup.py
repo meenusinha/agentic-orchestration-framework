@@ -204,6 +204,7 @@ def _write_copilot_instructions(repo: dict) -> Path:
     peer_names_list = " / ".join(p["name"] for p in peers)
 
     content = dedent(f"""\
+        <!-- agentic-orchestration: framework template, not indexed -->
         # {display} Repo Agent
 
         You are the AI agent for the **{display}** repository.

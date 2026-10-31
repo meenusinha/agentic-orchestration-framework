@@ -83,81 +83,106 @@ def _hint(path: Path) -> tuple[str, str]:
     return "plain text", "docs:text"
 
 
-def report(raw: str, fw: Path) -> list[tuple[str, str]]:
-    from codegraph.extract import extract
-    from codegraph.indexer import IndexConfig, collect_files
-    from codegraph.structure import resolve
-
+def repo_name_for(raw: str) -> tuple[str, Path]:
     m = re.match(r"^([A-Za-z0-9_-]+)=(.+)$", raw)
     name, path = (m.group(1), m.group(2)) if m else (None, raw)
     root = Path(path).expanduser().resolve()
     if name is None:
         name = re.sub(r"[^A-Za-z0-9_-]+", "-", root.name).strip("-").lower() or "repo"
-    print(f"\n━━ {name}  ({root})")
+    return name, root
+
+
+def analyze(name: str, root: Path) -> dict:
+    """Structured scan of one repo (used by the setup GUI and by report())."""
+    from codegraph.extract import extract
+    from codegraph.indexer import IndexConfig, collect_files
+    from codegraph.structure import resolve
+
+    out = {"name": name, "path": str(root), "ok": True}
     if not root.is_dir():
-        print("   ERROR: path does not exist")
-        return []
+        return dict(out, ok=False, error="path does not exist")
     nested = sorted(p.parent.name for p in root.glob("*/.git"))
     if not (root / ".git").exists() and nested:
-        print(f"   ⚠ Not a repo itself — it contains separate repos: {', '.join(nested)}. Connect those individually.")
-        return []
-
+        return dict(out, ok=False, error="not a repo itself — it contains separate repos: " + ", ".join(nested),
+                    nested_repos=nested)
     cfg_now = _current_config(root)
     cfg = IndexConfig(name, root, [root], cfg_now.get("file_types"), cfg_now.get("structure"))
     files, unknown, secrets = collect_files(cfg)
     rels = [rel for rel, _, _ in files]
     st = resolve(root, rels, cfg.structure)
-
-    langs = collections.Counter(lang for _, _, lang in files)
-    print("   Languages: " + (", ".join(f"{l} {n}" for l, n in langs.most_common()) or "(none recognised)"))
-    if secrets:
-        print(f"   Secret-store files (never indexed): {secrets}")
-
-    build_files = sorted({t.defined_in for t in st.targets.values()})
-    has_ccdb = (root / "compile_commands.json").exists() or any(root.glob("*/compile_commands.json"))
-    print(f"   Build: {', '.join(build_files) or 'no Makefile/CMakeLists targets found'}"
-          f"{' + compile_commands.json' if has_ccdb else ''}")
-    for t in sorted(st.targets.values(), key=lambda t: (t.kind, t.name)):
-        links = f", links {', '.join(sorted(t.links)[:6])}" if t.links else ""
-        print(f"     {t.kind:10s} {t.name}: {len(t.sources)} source file(s){links}")
-
-    idl = [(rel, ab) for rel, ab, lang in files if lang == "idl"]
-    if idl:
-        ifaces = []
-        for rel, ab in idl:
-            try:
-                tree = extract(rel, ab.read_text(errors="replace"), "idl")
-            except Exception:
-                continue
-            ifaces += [f"{n.qualname} ({sum(c.kind == 'idl_operation' for c in n.children)} ops)"
-                       for n in tree.walk() if n.kind == "idl_interface"]
-        print(f"   IDL: {len(idl)} file(s); interfaces: {', '.join(ifaces[:8]) or 'none'}"
-              f"{' …' if len(ifaces) > 8 else ''}")
-    if st.generated:
-        first = next(iter(st.generated))
-        print(f"   Generated code: {len(st.generated)} file(s), e.g. {first} ({st.generated[first]})")
-
-    print("   Proposed structure (role per folder; correct anything wrong with --role):")
+    out["languages"] = dict(collections.Counter(lang for _, _, lang in files).most_common())
+    out["secret_files"] = secrets
+    out["build_files"] = sorted({t.defined_in for t in st.targets.values()})
+    out["compile_db"] = (root / "compile_commands.json").exists() or any(root.glob("*/compile_commands.json"))
+    out["targets"] = [{"name": t.name, "kind": t.kind, "sources": len(t.sources), "links": sorted(t.links)}
+                      for t in sorted(st.targets.values(), key=lambda t: (t.kind, t.name))]
+    ifaces = []
+    for rel, ab, lang in files:
+        if lang != "idl":
+            continue
+        try:
+            tree = extract(rel, ab.read_text(errors="replace"), "idl")
+        except Exception:
+            continue
+        ifaces += [{"name": n.qualname, "file": rel,
+                    "operations": [c.name for c in n.children if c.kind == "idl_operation"]}
+                   for n in tree.walk() if n.kind == "idl_interface"]
+    out["idl_files"] = sum(1 for _, _, l in files if l == "idl")
+    out["interfaces"] = ifaces
+    out["generated"] = [{"file": f, "reason": r} for f, r in sorted(st.generated.items())]
     by_top = collections.defaultdict(collections.Counter)
     for rel in rels:
         parts = PurePosixPath(rel).parts
-        top = parts[0] if len(parts) > 1 else "(repo root)"
-        by_top[top][st.roles.get(rel, "implementation")] += 1
-    for top, roles in sorted(by_top.items()):
-        role, _ = roles.most_common(1)[0]
-        mixed = f"  (also {', '.join(f'{r} {c}' for r, c in roles.most_common()[1:])})" if len(roles) > 1 else ""
-        note = "  — signatures only" if role == "external" else ""
-        label = top + ("/" if top != "(repo root)" else "")
-        print(f"     {label:24s} {role:15s} {sum(roles.values())} file(s){mixed}{note}")
+        by_top[parts[0] if len(parts) > 1 else ""][st.roles.get(rel, "implementation")] += 1
+    out["folders"] = [{"folder": top, "role": roles.most_common(1)[0][0], "files": sum(roles.values()),
+                       "mixed": dict(roles) if len(roles) > 1 else {}}
+                      for top, roles in sorted(by_top.items())]
+    out["unknown_types"] = []
+    for ext, samples in sorted(unknown.items()):
+        what, suggestion = _hint(root / samples[0])
+        kind, _, parse_as = suggestion.partition(":")
+        out["unknown_types"].append({"ext": ext, "count": len(samples), "sample": samples[0], "looks_like": what,
+                                     "kind": kind, "parse_as": "" if parse_as.startswith("<") else parse_as,
+                                     "needs_language": parse_as.startswith("<")})
+    out["configured"] = bool(cfg_now)
+    return out
 
+
+def report(raw: str, fw: Path) -> list[tuple[str, str]]:
+    name, root = repo_name_for(raw)
+    a = analyze(name, root)
+    print(f"\n━━ {name}  ({root})")
+    if not a["ok"]:
+        print(f"   ⚠ {a['error']}")
+        return []
+    print("   Languages: " + (", ".join(f"{l} {n}" for l, n in a["languages"].items()) or "(none recognised)"))
+    if a["secret_files"]:
+        print(f"   Secret-store files (never indexed): {a['secret_files']}")
+    print(f"   Build: {', '.join(a['build_files']) or 'no Makefile/CMakeLists targets found'}"
+          f"{' + compile_commands.json' if a['compile_db'] else ''}")
+    for t in a["targets"]:
+        links = f", links {', '.join(t['links'][:6])}" if t["links"] else ""
+        print(f"     {t['kind']:10s} {t['name']}: {t['sources']} source file(s){links}")
+    if a["idl_files"]:
+        names = [f"{i['name']} ({len(i['operations'])} ops)" for i in a["interfaces"]]
+        print(f"   IDL: {a['idl_files']} file(s); interfaces: {', '.join(names[:8]) or 'none'}"
+              f"{' …' if len(names) > 8 else ''}")
+    if a["generated"]:
+        g = a["generated"][0]
+        print(f"   Generated code: {len(a['generated'])} file(s), e.g. {g['file']} ({g['reason']})")
+    print("   Proposed structure (role per folder; correct anything wrong with --role):")
+    for f in a["folders"]:
+        label = (f["folder"] + "/") if f["folder"] else "(repo root)"
+        mixed = {k: v for k, v in f["mixed"].items() if k != f["role"]}
+        extra = f"  (also {', '.join(f'{r} {c}' for r, c in mixed.items())})" if mixed else ""
+        note = "  — signatures only" if f["role"] == "external" else ""
+        print(f"     {label:24s} {f['role']:15s} {f['files']} file(s){extra}{note}")
     asks = []
-    if unknown:
+    if a["unknown_types"]:
         print("   UNKNOWN FILE TYPES — ask the developer what these contain:")
-        for ext, samples in sorted(unknown.items()):
-            what, suggestion = _hint(root / samples[0])
-            print(f"     {ext:10s} {len(samples)} file(s), e.g. {samples[0]} — looks like {what}")
-            asks.append((ext, suggestion))
-
+        for u in a["unknown_types"]:
+            print(f"     {u['ext']:10s} {u['count']} file(s), e.g. {u['sample']} — looks like {u['looks_like']}")
+            asks.append((u["ext"], f"{u['kind']}:{u['parse_as'] or '<language>'}"))
     flags = [("--repo", f"{name}={root}"), ("--src", f"{name}=.")]
     for ext, suggestion in asks:
         flags.append(("--file-type", f"{name}={ext}:{suggestion}"))
@@ -170,10 +195,15 @@ def report(raw: str, fw: Path) -> list[tuple[str, str]]:
 if __name__ == "__main__":
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument("--framework", required=True, help="path to the agentic-orchestration-framework clone")
+    ap.add_argument("--json", action="store_true", help="print one JSON document (for the setup GUI)")
     ap.add_argument("repos", nargs="+", metavar="[NAME=]PATH")
     a = ap.parse_args()
     fw = Path(a.framework).expanduser().resolve()
     _load_framework(fw)
+    if a.json:
+        import json
+        print(json.dumps([analyze(*repo_name_for(r)) for r in a.repos]))
+        sys.exit(0)
     for r in a.repos:
         report(r, fw)
     print()
