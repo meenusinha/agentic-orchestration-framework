@@ -40,6 +40,10 @@ import subprocess
 import sys
 from pathlib import Path
 
+for _s in (sys.stdout, sys.stderr):      # Windows consoles/pipes default to cp1252, which cannot print ✓ — … etc.
+    if hasattr(_s, "reconfigure"):
+        _s.reconfigure(encoding="utf-8", errors="replace")
+
 def _require_venv(what: str) -> None:
     """The framework installs, configures and runs inside a Python virtual environment by
     default. Set AO_ALLOW_NO_VENV=1 to override deliberately (a warning is printed)."""

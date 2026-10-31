@@ -10,6 +10,10 @@ import os
 import sys
 from pathlib import Path
 
+for _s in (sys.stdout, sys.stderr):      # Windows consoles/pipes default to cp1252, which cannot print ✓ — … etc.
+    if hasattr(_s, "reconfigure"):
+        _s.reconfigure(encoding="utf-8", errors="replace")
+
 FW = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(FW / "repo-agent" / "mcp"))
 

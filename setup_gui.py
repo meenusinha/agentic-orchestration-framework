@@ -25,6 +25,10 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from urllib.parse import parse_qs, urlparse
 
+for _s in (sys.stdout, sys.stderr):      # Windows consoles/pipes default to cp1252, which cannot print ✓ — … etc.
+    if hasattr(_s, "reconfigure"):
+        _s.reconfigure(encoding="utf-8", errors="replace")
+
 FW = Path(__file__).resolve().parent
 GUI = FW / "gui"
 SCRIPTS = FW / "skills" / "cross-repo-feature-analysis" / "scripts"
