@@ -1,68 +1,70 @@
 # Playground
 
-Two small sample repos, shaped like a real multi-process system, wired up from scratch so
-you can try the framework end to end in a few minutes.
+Two small sample repos, shaped like a real multi-process system, to try the framework
+end to end. They live in **their own GitHub repositories**, separate from the framework.
+Clone them like any other repos you want to connect.
 
 | Repo | Process | What's inside |
 |---|---|---|
-| `pw-server` | `authd` (+ library `libpwdpolicy.a`) | IDL `Auth::IPasswordService` · C++ servant · pure-C policy module · generated TAO stubs · Makefile + `compile_commands.json` · tests · vendored code · docs · an unknown `.xcfg` file · a **fake** secret |
-| `pw-client` | `ui-shell` | C++ login dialog and C legacy client calling the interface · Python, MATLAB and Perl tools · an in-house `.xidl` callback interface (`ISessionListener`) that the client implements and the server calls |
+| [`pw-server`](https://github.com/meenusinha/pw-server) | `authd` (+ library `libpwdpolicy.a`) | IDL `Auth::IPasswordService` · C++ servant · pure-C policy module · generated TAO stubs · Makefile + `compile_commands.json` · tests · vendored code · docs · an unknown `.xcfg` file · a **fake** secret |
+| [`pw-client`](https://github.com/meenusinha/pw-client) | `ui-shell` | C++ login dialog and C legacy client calling the interface · Python, MATLAB and Perl tools · an in-house `.xidl` callback interface (`ISessionListener`) that the client implements and the server calls |
 
 So links run both ways: the client calls `IPasswordService` on the server, and the
 server calls `ISessionListener` back on the client.
 
-## Easiest: the setup GUI
+Branches: `main` in both repos. `pw-client` also has `policy-hint`, where the login
+dialog shows the password policy when it opens: a new caller of the IDL attribute
+`minLength`.
+
+## With the setup GUI
 
 ```bash
-python3 setup_gui.py
+python3 setup_gui.py          # in the framework clone
 ```
 
-In step 2 (Model) point to the folder holding your copy of the model and click **Copy model**.
-In step 3 (Repositories) click **Create playground repos**, then click through the rest.
-After step 6 (Create GraphRAG), use the query field at the top, for example:
-
-- Search: `which processes are affected if PWD_MIN_LEN changes?`
-- Trace interface: `IPasswordService`
-- Impact of change: `pwd_policy_check`
+1. **Step 2 (Model):** point to the folder holding your copy of the model and click **Copy model**.
+2. **Step 3 (Repositories):** add each repo in one of two ways.
+   - **Already cloned:** click **Choose folder…** and pick your clone.
+   - **Clone from Git:** enter the URL (`https://github.com/meenusinha/pw-server.git`) and
+     the branch (`main`), and choose the folder to clone into. Then click **Clone and add**.
+     The **pw-server · pw-client** links fill in the URL and branch for you. If the folder
+     already holds a clone of the same repository, the GUI updates it and switches to the
+     branch instead of cloning again.
+3. **Step 4 (Review):** say what the unknown types contain. `.xcfg` is server configuration
+   (text); `.xidl` is an in-house IDL dialect.
+4. **Steps 5 and 6:** click **Configure**, then **Yes, create the GraphRAG**.
+5. Ask with the query field at the top, for example:
+   - Search: `which processes are affected if PWD_MIN_LEN changes?`
+   - Trace interface: `IPasswordService`
+   - Impact of change: `pwd_policy_check`
 
 Each result is saved as a new file in `<framework>/results/`.
 
-## Run it from scratch (command line)
+## From the command line
 
 Needs Python 3.11+ and git.
 
 ```bash
-git clone -b add-agent-skill https://github.com/meenusinha/agentic-orchestration-framework.git
-cd agentic-orchestration-framework
-python3 playground/setup_playground.py --download-model
+python3 playground/setup_playground.py --model-from /path/to/granite-embedding-small-english-r2
 ```
 
-- `--download-model` fetches the approved embedding model (~95 MB, pinned revision).
-  Already have it? Use `--model-from /path/to/granite-embedding-small-english-r2` instead.
-- `--dir PATH` puts the two repos somewhere other than `~/ao-playground`.
-- `--reset` starts over (it only ever deletes a folder it created).
-- Everything runs inside the framework's virtual environment (`.venv`): the script
-  creates it with the standard library only, then re-launches itself inside it, so
-  nothing is installed into your system Python. `--no-venv` opts out deliberately and
-  installs into the Python you ran it with.
+The script:
+1. clones both repos into `--dir` (default `~/ao-playground`), or updates existing clones
+2. installs the hash-locked requirements into `.venv`
+3. copies the model
+4. scans and configures both repos, answering the scan's questions the way a developer would
+5. runs a smoke test through the real MCP servers
 
-The script creates the two repos, installs the hash-locked requirements into `.venv`,
-scans and configures both repos (answering the scan's questions the way a developer
-would), then runs a smoke test through the real MCP servers:
+Options:
+- `--dir PATH` and `--branch NAME` choose where to clone and which branch to check out.
+- `--server-url` and `--client-url` point at forks or mirrors.
+- `--no-venv` opts out of the virtual environment deliberately and installs into the
+  Python you ran it with.
 
-```
-   PASS  IPasswordService: defined in pw-server, served by process authd
-   PASS  IPasswordService: C++, C and Python clients in pw-client
-   PASS  ISessionListener (in-house .xidl): implemented by pw-client
-   PASS  ISessionListener: called back by pw-server
-   PASS  impact of pwd_policy_check reaches pw-client through the IDL
-   ...
-```
-
-## Try it
+## Try it in an AI assistant (optional)
 
 ```bash
-cd ~/ao-playground/pw-client && claude      # approve the project MCP servers
+cd <your clone>/pw-client && claude      # approve the project MCP servers
 ```
 
 - *What would it take to show the policy hint in the login dialog's strength meter?*
@@ -71,28 +73,17 @@ cd ~/ao-playground/pw-client && claude      # approve the project MCP servers
 - *Add a new IDL operation `isCompromised(pw)` — what has to change, where, in what order?*
 - *Where are database credentials configured?* (watch for `[REDACTED]`)
 
-In VS Code (`code ~/ao-playground/pw-client`), allow the MCP servers and start requests
-with `/cross-repo-feature-analysis`. Without an editor:
-`.venv/bin/python test_mcp.py "your question"`.
-
-## Try the guided setup instead
-
-```bash
-python3 playground/setup_playground.py --guided --reset
-cd ~/ao-playground/pw-client && claude
-```
-
-Then ask: *"Set up cross-repo analysis between this repo and ../pw-server. The framework
-is at <this clone>."* The agent scans both repos, asks you what `.xcfg` and `.xidl` files
-contain, asks about the embedding model, and configures everything.
+In VS Code, allow the MCP servers and start requests with `/cross-repo-feature-analysis`.
 
 ## Things to edit and watch
 
-- Change `PWD_MIN_LEN` or add an operation to `pw-server/idl/auth.idl` — within a minute
-  the servers rebuild (only changed code is re-embedded) and `trace_interface` reports
-  e.g. *"not implemented by any provider: isCompromised"* until the servant implements it.
-- `tail -f ~/.agentic-orchestration/logs/mcp-orchestration.log` shows every tool call
-  (code text is hidden unless `log_content: true` in `orchestrator/mcp/config.yaml`).
+- **Switch branches:** move `pw-client` to `policy-hint` (clone it again in the GUI with that
+  branch, or run `git switch policy-hint`). Then trace `IPasswordService`: `LoginDialog::onOpen`
+  now appears as a caller of `minLength`.
+- **Change the interface:** change `PWD_MIN_LEN`, or add an operation to `pw-server/idl/auth.idl`.
+  The graph updates within a minute; only changed code is re-embedded. Until the servant
+  implements a new operation, `trace_interface` reports e.g. *"not implemented by any
+  provider: isCompromised"*.
 
 ## Automated end-to-end test (Windows, macOS, Linux)
 
@@ -100,7 +91,7 @@ contain, asks about the embedding model, and configures everything.
 python playground/gui_selftest.py --model-from <folder holding the model>
 ```
 
-Starts the setup GUI as a user would and performs every step through its API (install,
-model copy, playground repos, scan, configure, GraphRAG, queries, restart), plus the
-security guards — 37 checks. GitHub Actions runs it on Windows, macOS and Linux
-(`.github/workflows/gui.yml`).
+Starts the setup GUI as a user would and runs every step through its API: install, model
+copy, cloning both repos (including branch switching and the refusal cases), scan,
+configure, GraphRAG, queries and restart. It also checks the security guards. GitHub
+Actions runs it on Windows, macOS and Linux (`.github/workflows/gui.yml`).

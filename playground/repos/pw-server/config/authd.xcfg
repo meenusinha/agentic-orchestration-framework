@@ -1,3 +1,0 @@
-service AuthService
-  listen 127.0.0.1:7001
-  policy_reload_seconds 300

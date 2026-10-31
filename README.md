@@ -21,7 +21,10 @@ It creates its own virtual environment (`.venv`) and opens a local page in your 
 
 1. **Install**: hash-verified packages into `.venv`
 2. **Model**: point to the folder holding your copy of the model; it is copied and hash-checked (the GUI never downloads)
-3. **Repositories**: pick folders, or create the two playground repos
+3. **Repositories**: for each repo to connect, choose the folder of an existing clone, or give its Git URL and
+   branch and choose where to clone it (the GUI clones it and switches to the branch). To try it out, use the
+   playground repos [pw-server](https://github.com/meenusinha/pw-server) and
+   [pw-client](https://github.com/meenusinha/pw-client) — see `playground/README.md`
 4. **Review**: the processes, IDL interfaces and folder roles the scan found; say what
    unknown file types contain
 5. **Configure**

@@ -16,7 +16,7 @@ from pathlib import Path
 import numpy as np
 
 from .model import (CALLS, CALLS_OPERATION, CLASS, CONTAINS, DECLARES, DOCUMENTS, FILE, FUNCTION, FUNCTION_DECL,
-                    GENERATED_FROM, IDL_INTERFACE, IDL_OPERATION, IMPLEMENTS, METHOD, MODULE, NAMESPACE, TESTS)
+                    GENERATED_FROM, IDL_ATTRIBUTE, IDL_INTERFACE, IDL_OPERATION, IMPLEMENTS, METHOD, MODULE, NAMESPACE, TESTS)
 from .store import Store
 
 _ROLE_WEIGHT = {"interface": 1.15, "implementation": 1.0, "internal": 1.0, "library": 1.0, "docs": 1.0,
@@ -140,7 +140,7 @@ class GraphSearch:
             out["relations"] = {k: v[:8] for k, v in rel.items()}
         iface_ids = {r["name"].rsplit("::", 1)[0] if r.get("kind") == "op" else r["name"]
                      for r in rel.get("implements", []) + rel.get("calls_operation", [])}
-        if n["kind"] in (IDL_INTERFACE, IDL_OPERATION):
+        if n["kind"] in (IDL_INTERFACE, IDL_OPERATION, IDL_ATTRIBUTE):
             iface_ids.add(n["qualname"] if n["kind"] == IDL_INTERFACE else n["qualname"].rsplit("::", 1)[0])
         if iface_ids:
             out["interfaces"] = [self.trace_interface(i, include_text=False, op=_op_of(n)) for i in sorted(iface_ids)]
@@ -298,8 +298,9 @@ class GraphSearch:
                                                      ({n["target"]} if n["target"] else set()))})
             seen_ops = set()
             for i in impl:
-                if i.get("remote") or i.get("kind") in ("op", "interface", "idl_operation", "idl_interface"):
-                    is_op = i.get("kind") in ("op", "idl_operation")
+                if i.get("remote") or i.get("kind") in ("op", "interface", "idl_operation", "idl_attribute",
+                                                        "idl_interface"):
+                    is_op = i.get("kind") in ("op", "idl_operation", "idl_attribute")
                     iid = i["name"].rsplit("::", 1)[0] if is_op else i["name"]
                     op = i["name"].rsplit("::", 1)[1] if is_op else None
                     if (iid, op) in seen_ops:
@@ -346,7 +347,7 @@ class GraphSearch:
 
 
 def _op_of(n: dict) -> str | None:
-    return n["name"] if n["kind"] == IDL_OPERATION else None
+    return n["name"] if n["kind"] in (IDL_OPERATION, IDL_ATTRIBUTE) else None
 
 
 def _public(n: dict, repo: str, text: bool = True) -> dict:

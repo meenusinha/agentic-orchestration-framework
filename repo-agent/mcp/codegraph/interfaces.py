@@ -50,9 +50,34 @@ def collect_defines(files: dict[str, Node]) -> list[dict]:
                 "fingerprint": hashlib.sha256(canon.encode()).hexdigest()[:16], "text": n.text,
                 "operations": [{"name": o.name, "uid": o.uid, "signature": o.signature, "text": o.text,
                                 "returns": o.attrs.get("returns", ""), "direction": o.attrs.get("direction", ""),
-                                "lines": [o.start_line, o.end_line]} for o in ops],
+                                "lines": [o.start_line, o.end_line]} for o in ops] +
+                              [{"name": a.name, "uid": a.uid, "signature": a.signature, "text": a.text,
+                                "kind": "attribute", "readonly": bool(a.attrs.get("readonly")),
+                                "aliases": attribute_accessors(a.name, bool(a.attrs.get("readonly"))),
+                                "lines": [a.start_line, a.end_line]} for a in attrs],
                 "attributes": [{"name": a.name, "uid": a.uid, "signature": a.signature} for a in attrs],
             })
+    return out
+
+
+def attribute_accessors(name: str, readonly: bool) -> list[str]:
+    """Method names an IDL attribute is called/implemented through, across language mappings:
+    CORBA C++/Java `name()` / `name(v)`, omniORB Python `_get_name` / `_set_name`,
+    MIDL/COM `get_name` / `put_name`, and the common `getName` / `setName`."""
+    cap = name[:1].upper() + name[1:]
+    names = [name, f"_get_{name}", f"get_{name}", f"get{cap}"]
+    if not readonly:
+        names += [f"_set_{name}", f"set_{name}", f"put_{name}", f"set{cap}"]
+    return names
+
+
+def op_names(iface: dict) -> dict[str, str]:
+    """name a call or method may use → the interface's operation/attribute name."""
+    out = {}
+    for o in iface["operations"]:
+        for a in o.get("aliases") or [o["name"]]:
+            out.setdefault(a, o["name"])
+        out[o["name"]] = o["name"]
     return out
 
 
@@ -159,7 +184,8 @@ def type_keys(raw: str) -> list[tuple[str, float]]:
 class Resolver:
     def __init__(self, defines_by_repo: dict[str, list[dict]]):
         self.by_id, self.by_name = {}, defaultdict(list)
-        self.op_index = defaultdict(list)               # op name → [(repo, iface)]
+        self.op_index = defaultdict(list)               # operation / attribute name → [iface]
+        self.alias_index = defaultdict(list)            # attribute accessor name (get_x, setX…) → [iface]
         for repo, defs in defines_by_repo.items():
             for d in defs:
                 entry = dict(d, repo=repo)
@@ -169,6 +195,14 @@ class Resolver:
                     self.by_name[d["name"][1:]].append(entry)
                 for o in d["operations"]:
                     self.op_index[o["name"]].append(entry)
+                for alias, canon in op_names(d).items():
+                    if alias != canon:
+                        self.alias_index[alias].append(entry)
+
+    def owners(self, name: str) -> dict:
+        """Interfaces that have an operation (or, failing that, an attribute accessor) of this name.
+        Real operation names win, so synthesized accessor names never make a unique name ambiguous."""
+        return {e["id"]: e for e in self.op_index.get(name) or self.alias_index.get(name, [])}
 
     def match_type(self, raw: str):
         for key, conf in type_keys(raw):
@@ -190,8 +224,8 @@ class Resolver:
         for i in range(len(parts) - 1, 0, -1):
             prefix, op = "_".join(parts[:i]), "_".join(parts[i:])
             iface, conf = self.match_type(prefix)
-            if iface is not None and any(o["name"] == op for o in iface["operations"]):
-                return iface, op, conf
+            if iface is not None and op in op_names(iface):
+                return iface, op_names(iface)[op], conf
         return None, None, 0.0
 
     def resolve(self, refs: list[dict]) -> dict:
@@ -205,8 +239,8 @@ class Resolver:
                 if k == "generated":
                     generated.append(_link(r, iface, conf))
                     continue
-                op_names = {o["name"] for o in iface["operations"]}
-                ops = {name: uid for name, uid in r.get("ops", {}).items() if name in op_names}
+                names = op_names(iface)
+                ops = {names[name]: uid for name, uid in r.get("ops", {}).items() if name in names}
                 if k == "server" and r.get("ops") and not ops and conf < 0.9:
                     continue                            # weak name match with no overlapping operations
                 link = _link(r, iface, min(1.0, conf + (0.05 if ops else 0)))
@@ -220,28 +254,30 @@ class Resolver:
                     if base is None or base["id"] in seen:
                         continue
                     seen.add(base["id"])
-                    bops = {o["name"]: r.get("ops", {})[o["name"]] for o in base["operations"]
-                            if o["name"] in r.get("ops", {})}
+                    bnames = op_names(base)
+                    bops = {bnames[name]: uid for name, uid in r.get("ops", {}).items() if name in bnames}
                     blink = _link(r, base, round(min(link["confidence"], bconf), 2))
                     blink["ops"], blink["via"] = bops, iface["id"]
                     implements.append(blink)
                     todo += base.get("bases", [])
             elif k == "client":
                 iface, conf = self.match_type(r["type"])
-                if iface is not None and any(o["name"] == r["op"] for o in iface["operations"]):
-                    consumes.append(dict(_link(r, iface, conf), op=r["op"]))
+                if iface is not None and r["op"] in op_names(iface):
+                    consumes.append(dict(_link(r, iface, conf), op=op_names(iface)[r["op"]]))
                 elif r.get("fallback_weak"):        # e.g. svc = connect("AuthService"): type unknown
-                    owners = {e["id"]: e for e in self.op_index.get(r["op"], [])}
+                    owners = self.owners(r["op"])
                     if len(owners) == 1:
-                        consumes.append(dict(_link(r, next(iter(owners.values())), 0.5), op=r["op"]))
+                        owner = next(iter(owners.values()))
+                        consumes.append(dict(_link(r, owner, 0.5), op=op_names(owner)[r["op"]]))
             elif k == "client_c":
                 iface, op, conf = self.match_c_call(r["op"])
                 if iface is not None:
                     consumes.append(dict(_link(r, iface, conf), op=op))
             elif k == "client_weak":
-                owners = {e["id"]: e for e in self.op_index.get(r["op"], [])}
+                owners = self.owners(r["op"])
                 if len(owners) == 1:                    # op name unique across all known interfaces
-                    consumes.append(dict(_link(r, next(iter(owners.values())), 0.5), op=r["op"]))
+                    owner = next(iter(owners.values()))
+                    consumes.append(dict(_link(r, owner, 0.5), op=op_names(owner)[r["op"]]))
         return {"implements": _best(implements), "consumes": _best(consumes, key_op=True),
                 "generated": _best(generated)}
 

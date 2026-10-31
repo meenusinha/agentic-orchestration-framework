@@ -30,7 +30,7 @@ from .structure import resolve
 
 INDEX_FORMAT = 1
 _NOT_INDEXED_MARK = b"<!-- agentic-orchestration: framework template, not indexed -->"
-EMBED_KINDS = {FUNCTION, METHOD, CLASS, TYPE, MACRO, IDL_INTERFACE, IDL_OPERATION, IDL_TYPE, DOC_SECTION, TEXT,
+EMBED_KINDS = {FUNCTION, METHOD, CLASS, TYPE, MACRO, IDL_INTERFACE, IDL_OPERATION, IDL_ATTRIBUTE, IDL_TYPE, DOC_SECTION, TEXT,
                MODULE, NAMESPACE, TARGET}
 NOT_SEARCHED_ROLES = {"test"}          # tests are evidence (TESTS edges), never results
 _SKIP_DIRS = {".git", ".hg", ".svn", "node_modules", ".venv", "venv", "__pycache__", ".rag_index", ".chroma_db",

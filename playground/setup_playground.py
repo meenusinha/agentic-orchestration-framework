@@ -2,10 +2,11 @@
 """
 Playground: two sample repos wired up from scratch, to try the framework end to end.
 
-  pw-server  — authd process: IDL (Auth::IPasswordService), C++ servant, C policy
+The two repos live in their own GitHub repositories (they are not part of the framework):
+  https://github.com/meenusinha/pw-server   — authd process: IDL (Auth::IPasswordService), C++ servant, C policy
                library, generated stubs, Makefile + compile_commands.json, tests,
                vendored code, docs, an unknown .xcfg file, a FAKE secret
-  pw-client  — ui-shell process: C++ and C clients, Python/MATLAB/Perl tools, and an
+  https://github.com/meenusinha/pw-client   — ui-shell process: C++ and C clients, Python/MATLAB/Perl tools, and an
                in-house .xidl callback interface it implements and the server calls
 
 Everything runs inside the framework's virtual environment (<framework>/.venv): the
@@ -14,7 +15,7 @@ inside it, so nothing is ever installed into your system Python. To deliberately
 the current interpreter instead, pass --no-venv.
 
 Steps (each prints what it does):
-  1. create the two repos as git repos in --dir (default ~/ao-playground)
+  1. clone the two repos into --dir (default ~/ao-playground), or update existing clones
   2. install the hash-locked requirements into the venv
   3. check the embedding model (copy with --model-from, or --download-model)
   4. scan both repos and configure them        (skipped with --guided)
@@ -25,11 +26,11 @@ Usage (from the framework clone, with Python 3.11+):
   python3 playground/setup_playground.py --download-model
   python3 playground/setup_playground.py --model-from /path/to/granite-embedding-small-english-r2
   python3 playground/setup_playground.py --guided        # let the agent do steps 4–5 with you
-  python3 playground/setup_playground.py --reset ...     # start over (only deletes a playground dir)
+  python3 playground/setup_playground.py --dir ~/work --branch main ...   # where to clone, which branch
+  The setup GUI (python3 setup_gui.py) does the same with clicks: step 3 → Clone from Git.
   python3 playground/setup_playground.py --no-venv ...   # opt out of the venv (installs into this Python)
 """
 import argparse
-import json
 import os
 import shutil
 import subprocess
@@ -41,8 +42,6 @@ for _s in (sys.stdout, sys.stderr):      # Windows consoles/pipes default to cp1
         _s.reconfigure(encoding="utf-8", errors="replace")
 
 FW = Path(__file__).resolve().parent.parent
-TEMPLATES = FW / "playground" / "repos"
-MARKER = ".ao-playground"
 MODEL_DIR = FW / "models" / "granite-embedding-small-english-r2"
 SKILL = FW / "skills" / "cross-repo-feature-analysis"
 WIN = os.name == "nt"
@@ -61,40 +60,17 @@ def venv_python() -> Path:
     return FW / ".venv" / ("Scripts/python.exe" if WIN else "bin/python")
 
 
-def _force_remove(func, path, _exc):
-    """shutil.rmtree helper: git marks object files read-only, which Windows refuses to delete."""
-    import stat
-    os.chmod(path, stat.S_IWRITE)
-    func(path)
-
-
-def make_repos(base: Path, reset: bool):
-    if base.exists() and any(base.iterdir()):
-        if not (base / MARKER).exists():
-            sys.exit(f"ERROR: {base} exists and is not a playground folder — choose another --dir")
-        if not reset:
-            sys.exit(f"ERROR: {base} already holds a playground. Use --reset to start over.")
-        shutil.rmtree(base, onerror=_force_remove)
+def clone_repos(base: Path, branch: str, urls: dict) -> dict:
+    sys.path.insert(0, str(FW / "gui"))
+    import gitclone
     base.mkdir(parents=True, exist_ok=True)
-    (base / MARKER).write_text("created by agentic-orchestration-framework/playground\n")
-    for name in ("pw-server", "pw-client"):
-        dst = base / name
-        shutil.copytree(TEMPLATES / name, dst)
-        if name == "pw-server":   # compile database with this machine's absolute paths
-            d = str(dst)
-            json.dump([{"directory": d, "file": f, "arguments": [cc, "-Iinclude", "-Igen", "-Isrc", "-c", f]}
-                       for f, cc in (("src/server.cpp", "g++"), ("src/session_notifier.cpp", "g++"),
-                                     ("src/main.cpp", "g++"), ("policy/pwd_policy.c", "gcc"))] +
-                      [{"directory": d, "file": "include/pwd_policy.h",
-                        "arguments": ["gcc", "-x", "c", "-c", "include/pwd_policy.h"]}],
-                      open(dst / "compile_commands.json", "w"), indent=1)
-        if shutil.which("git"):                 # git is optional: the framework indexes plain folders too
-            git = ["git", "-C", str(dst)]
-            subprocess.run(git + ["init", "-q"], check=True)
-            subprocess.run(git + ["-c", "core.autocrlf=false", "add", "-A"], check=True)
-            subprocess.run(git + ["-c", "user.name=playground", "-c", "user.email=playground@example.invalid",
-                                  "commit", "-qm", "playground sample repo"], check=True)
-        print(f"   ✓ {dst}")
+    out = {}
+    for name, url in urls.items():
+        try:
+            out[name] = Path(gitclone.clone(url, branch, str(base), name, log=lambda l: print("   " + l))["path"])
+        except (ValueError, RuntimeError) as e:
+            sys.exit(f"ERROR: {e}")
+    return out
 
 
 def in_framework_venv() -> bool:
@@ -139,8 +115,10 @@ def model_flags(args, py) -> list:
 
 def main():
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
-    ap.add_argument("--dir", default=str(Path.home() / "ao-playground"), help="where to create the two repos")
-    ap.add_argument("--reset", action="store_true", help="delete an existing playground at --dir first")
+    ap.add_argument("--dir", default=str(Path.home() / "ao-playground"), help="folder to clone the two repos into")
+    ap.add_argument("--branch", default="main", help="branch to check out in both repos (default: main)")
+    ap.add_argument("--server-url", default="https://github.com/meenusinha/pw-server.git")
+    ap.add_argument("--client-url", default="https://github.com/meenusinha/pw-client.git")
     ap.add_argument("--model-from", help="copy the approved embedding model from this folder")
     ap.add_argument("--download-model", action="store_true", help="download the embedding model (~95 MB)")
     ap.add_argument("--guided", action="store_true", help="stop after creating repos: let the agent configure")
@@ -153,10 +131,9 @@ def main():
     elif not in_framework_venv():
         enter_venv()
     base = Path(args.dir).expanduser().resolve()
-    server, client = base / "pw-server", base / "pw-client"
-
-    step(1, f"Create the sample repos in {base}")
-    make_repos(base, args.reset)
+    step(1, f"Clone the sample repos into {base} (branch {args.branch})")
+    repos = clone_repos(base, args.branch, {"pw-server": args.server_url, "pw-client": args.client_url})
+    server, client = repos["pw-server"], repos["pw-client"]
 
     step(2, "Install requirements into " + ("the current Python" if args.no_venv else "the venv") +
          " (hash-verified)")
@@ -213,7 +190,7 @@ def main():
      • Add a new IDL operation isCompromised(pw) — what has to change, in which repo, in what order?
      • Where are database credentials configured?      (watch for [REDACTED])
 
-   Start over:    python3 playground/setup_playground.py --reset --dir {base} ...""")
+   Start over:    delete {base} and run this script again""")
 
 
 if __name__ == "__main__":

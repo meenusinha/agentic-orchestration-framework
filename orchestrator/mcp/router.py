@@ -190,7 +190,7 @@ class OrchestratorRouter:
                         linked_ifaces.add(dname)    # interface or interface::operation, resolved below
                 for uid, _ in hits:
                     n = store.node(uid)
-                    if n and n["kind"] in ("idl_interface", "idl_operation"):
+                    if n and n["kind"] in ("idl_interface", "idl_operation", "idl_attribute"):
                         linked_ifaces.add(n["qualname"] if n["kind"] == "idl_interface"
                                           else n["qualname"].rsplit("::", 1)[0])
                 continue

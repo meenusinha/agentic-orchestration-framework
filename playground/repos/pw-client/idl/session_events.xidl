@@ -1,8 +1,0 @@
-// In-house IPC dialect: callbacks the server process sends to UI processes.
-module SessionEvents {
-  /** Implemented by every UI process; authd calls it. */
-  ipc_service ISessionListener {
-    event sessionExpired(string user);
-    event policyChanged(u32 minLength);
-  }
-}

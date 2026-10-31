@@ -31,6 +31,8 @@ for _s in (sys.stdout, sys.stderr):      # Windows consoles/pipes default to cp1
 
 FW = Path(__file__).resolve().parent
 GUI = FW / "gui"
+sys.path.insert(0, str(GUI))
+import gitclone  # noqa: E402  (standard library only)
 SCRIPTS = FW / "skills" / "cross-repo-feature-analysis" / "scripts"
 MODEL_DIR = FW / "models" / "granite-embedding-small-english-r2"
 WIN = os.name == "nt"
@@ -199,10 +201,11 @@ def configured_repos() -> list:
 
 def suggestions() -> list:
     out, seen = [], set()
-    for base in (FW.parent, Path.home() / "ao-playground", Path.home()):
+    for base in (FW.parent, Path.home()):
         try:
             for d in sorted(base.iterdir()):
-                if d.is_dir() and (d / ".git").exists() and d.resolve() != FW and str(d) not in seen:
+                if (d.is_dir() and not d.name.startswith(".") and (d / ".git").exists()
+                        and d.resolve() != FW and str(d) not in seen):
                     seen.add(str(d))
                     out.append(str(d))
         except OSError:
@@ -221,7 +224,7 @@ def state() -> dict:
             "deps_ok": ok, "model_ok": (MODEL_DIR / "model.safetensors").exists(), "model_dir": str(MODEL_DIR),
             "model_copies": copies, "repos": configured_repos(), "suggestions": suggestions(),
             "graph_ready": graph_ready(), "results_dir": str(RESULTS),
-            "home": str(Path.home()), "playground_dir": str(Path.home() / "ao-playground")}
+            "home": str(Path.home()), "samples": gitclone.SAMPLE_REPOS, "git": gitclone.available()}
 
 
 # ── actions ───────────────────────────────────────────────────────────────────
@@ -296,16 +299,12 @@ def job_verify(job):
     return result
 
 
-def job_playground(body):
+# ── clone a repo from a URL + branch into a folder the user chose ────────────
+def job_clone(body):
     def run(job):
-        import importlib.util
-        spec = importlib.util.spec_from_file_location("pg", FW / "playground" / "setup_playground.py")
-        pg = importlib.util.module_from_spec(spec)
-        spec.loader.exec_module(pg)
-        base = Path(body.get("dir") or Path.home() / "ao-playground").expanduser().resolve()
-        pg.make_repos(base, reset=bool(body.get("reset")))
-        job.log(f"✓ sample repos created in {base}")
-        return {"repos": [str(base / "pw-server"), str(base / "pw-client")]}
+        import gitclone
+        return gitclone.clone(str(body.get("url", "")), str(body.get("branch", "")), str(body.get("parent", "")),
+                              str(body.get("name", "")), log=job.log)
     return run
 
 
@@ -420,8 +419,8 @@ class Handler(BaseHTTPRequestHandler):
                 return self._send(200, {"job": start_job("Configure", job_configure(body))})
             if u.path == "/api/verify":
                 return self._send(200, {"job": start_job("Verify", job_verify)})
-            if u.path == "/api/playground":
-                return self._send(200, {"job": start_job("Playground", job_playground(body))})
+            if u.path == "/api/clone":
+                return self._send(200, {"job": start_job("Clone", job_clone(body))})
             if u.path == "/api/query":
                 if not graph_ready():
                     return self._send(409, {"error": "Create the GraphRAG first (step 6)"})

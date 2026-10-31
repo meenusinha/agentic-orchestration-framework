@@ -186,7 +186,10 @@ def _compile_db(root: Path, fileset: set, st: Structure):
         except (OSError, ValueError):
             continue
         for e in entries if isinstance(entries, list) else []:
-            src = Path(e.get("directory", ".")) / e.get("file", "")
+            base = Path(e.get("directory") or ".")
+            if not base.is_absolute():           # checked-in databases: relative to the file itself
+                base = cand.parent / base
+            src = base / e.get("file", "")
             try:
                 rel = src.resolve().relative_to(root.resolve()).as_posix()
             except ValueError:

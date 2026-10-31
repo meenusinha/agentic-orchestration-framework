@@ -98,9 +98,12 @@ def start_gui(env):
 def main():
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument("--model-from", required=True, help="folder holding the approved embedding model")
-    ap.add_argument("--dir", help="where to create the playground repos (default: a temp folder)")
+    ap.add_argument("--dir", help="folder to clone the playground repos into (default: a temp folder)")
+    ap.add_argument("--server-url", default="https://github.com/meenusinha/pw-server.git")
+    ap.add_argument("--client-url", default="https://github.com/meenusinha/pw-client.git")
     a = ap.parse_args()
-    pg_dir = Path(a.dir) if a.dir else Path(tempfile.mkdtemp(prefix="ao-selftest-")) / "ao-playground"
+    pg_dir = Path(a.dir) if a.dir else Path(tempfile.mkdtemp(prefix="ao-selftest-"))
+    pg_dir.mkdir(parents=True, exist_ok=True)
     env = {**os.environ, "PYTHONUNBUFFERED": "1"}
     env.pop("VIRTUAL_ENV", None)
 
@@ -150,20 +153,39 @@ def main():
         else:
             check("reaches the file-system root", top.get("path") == "/")
 
-        print("\n6. Repositories", flush=True)
-        ok, lines, res = g.job("/api/playground", {"dir": str(pg_dir), "reset": True})
-        check("playground repos created", ok and res and len(res["repos"]) == 2, str(pg_dir))
+        print("\n6. Repositories (clone from Git: URL + branch, into a chosen folder)", flush=True)
+        ok, lines, srv = g.job("/api/clone", {"url": a.server_url, "branch": "main", "parent": str(pg_dir)})
+        check("pw-server cloned (branch main)", ok and srv and srv["branch"] == "main", srv and srv["path"])
         if not ok:
             raise SystemExit(1)
-        ok2, lines2, _ = g.job("/api/playground", {"dir": str(pg_dir), "reset": True})
-        check("re-creating the playground (reset) works", ok2, lines2[-1] if lines2 else "")
-        foreign = Path(tempfile.mkdtemp(prefix="ao-notpg-"))
-        (foreign / "keep.txt").write_text("user data")
-        ok3, lines3, _ = g.job("/api/playground", {"dir": str(foreign), "reset": True})
-        check("refuses to replace a folder that is not a playground", not ok3 and (foreign / "keep.txt").exists(),
-              lines3[-1][-80:] if lines3 else "")
-        check("the GUI is not blocked after a failed step", g.call("/api/state")[0] == 200 and
-              g.job("/api/playground", {"dir": str(pg_dir), "reset": True})[0])
+        ok, lines, cli = g.job("/api/clone", {"url": a.client_url, "branch": "policy-hint", "parent": str(pg_dir)})
+        check("pw-client cloned on branch policy-hint", ok and cli and cli["branch"] == "policy-hint", cli and cli["commit"])
+        ok, lines, cli = g.job("/api/clone", {"url": a.client_url, "branch": "main", "parent": str(pg_dir)})
+        check("existing clone reused and switched to main", ok and cli and cli["branch"] == "main" and
+              any("already a clone" in l for l in lines), cli and cli["commit"])
+        res = {"repos": [srv["path"], cli["path"]]}
+        ok, lines, _ = g.job("/api/clone", {"url": a.client_url, "branch": "no-such-branch", "parent": str(pg_dir)})
+        check("a missing branch fails with a message", not ok and "could not switch" in (lines[-1] if lines else ""),
+              lines[-1][-80:] if lines else "")
+        ok, lines, _ = g.job("/api/clone", {"url": a.server_url, "branch": "main", "parent": str(pg_dir), "name": "pw-client"})
+        check("never reuses a clone of a different repository", not ok and "different repository" in (lines[-1] if lines else ""))
+        foreign = Path(tempfile.mkdtemp(prefix="ao-notrepo-"))
+        (foreign / "pw-server").mkdir()
+        (foreign / "pw-server" / "keep.txt").write_text("user data")
+        ok, lines, _ = g.job("/api/clone", {"url": a.server_url, "parent": str(foreign)})
+        check("never overwrites an existing folder", not ok and (foreign / "pw-server" / "keep.txt").exists() and
+              not (foreign / "pw-server" / ".git").exists(), lines[-1][-70:] if lines else "")
+        marker = Path(tempfile.gettempdir()) / "ao-ext-pwned"
+        for bad, why in [({"url": f"ext::sh -c touch% {marker}", "parent": str(pg_dir)}, "ext:: transport"),
+                         ({"url": "--upload-pack=touch /tmp/x", "parent": str(pg_dir)}, "option-like URL"),
+                         ({"url": a.server_url, "branch": "--force", "parent": str(pg_dir)}, "option-like branch"),
+                         ({"url": a.server_url, "branch": "main", "parent": ""}, "no folder chosen"),
+                         ({"url": a.server_url, "parent": str(pg_dir), "name": "../escape"}, "path in folder name")]:
+            ok, lines, _ = g.job("/api/clone", bad)
+            check(f"refused: {why}", not ok, lines[-1][-70:] if lines else "")
+        check("ext:: did not run anything", not marker.exists())
+        check("the GUI is not blocked after failed steps", g.call("/api/state")[0] == 200 and
+              g.job("/api/clone", {"url": a.server_url, "branch": "main", "parent": str(pg_dir)})[0])
 
         print("\n7. Review (scan)", flush=True)
         code, sc = g.call("/api/scan", {"repos": [{"path": p} for p in res["repos"]]})

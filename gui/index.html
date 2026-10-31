@@ -49,6 +49,9 @@ code,.mono{font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;font
 .badge{font-size:11px;padding:1px 7px;border-radius:999px;background:var(--chip);color:var(--muted)}
 .cmd{display:flex;gap:8px;align-items:center;background:var(--code);border:1px solid var(--line);border-radius:8px;padding:6px 8px;margin:6px 0}
 .cmd code{flex:1;word-break:break-all}.err{color:var(--bad);margin-top:10px}
+.addgrid{display:grid;grid-template-columns:1fr 1fr;gap:14px;margin-top:14px}@media (max-width:900px){.addgrid{grid-template-columns:1fr}}
+.addgrid .card{margin:0}.field{display:flex;flex-direction:column;gap:4px;margin:8px 0}.field label{font-size:12.5px;color:var(--muted)}
+.field input{width:100%}.field .row input{flex:1}
 .iface{border-left:3px solid var(--accent);padding:6px 12px;margin:10px 0}.small{font-size:12.5px;color:var(--muted)}
 .qbar{position:sticky;top:0;z-index:5;background:var(--panel);border-bottom:1px solid var(--line);padding:10px 28px;display:flex;gap:8px;align-items:center;flex-wrap:wrap}
 .qbar input{flex:1;min-width:240px}.qbar .hint{font-size:12px;color:var(--muted);width:100%}
@@ -91,11 +94,28 @@ details summary{cursor:pointer;color:var(--muted);font-size:12.5px}.saved{font-s
 
     <section data-step="repos">
       <h2>3. Repositories</h2>
-      <p class="sub">Choose at least two repositories that should know about each other — for example the repo that holds the IDL interfaces, the server and the clients.</p>
+      <p class="sub">Which repositories should be connected? Add at least two — for example the repo that holds the IDL interfaces, the server and the clients. Add each one either from a folder you have already cloned, or from its Git URL and branch.</p>
       <div id="repoList"></div>
-      <div class="row" style="margin-top:12px"><button id="addRepo">Add repository…</button><button id="mkPlayground">Create playground repos</button><span class="spacer"></span><button class="primary" id="reposNext">Continue</button></div>
-      <div class="log" id="pgLog"></div>
-      <div id="suggest" style="margin-top:18px"></div>
+      <div class="addgrid">
+        <div class="card">
+          <h3>Already cloned</h3>
+          <p class="small">Pick the repository's folder on this computer.</p>
+          <button id="addRepo">Choose folder…</button>
+          <div id="suggest" style="margin-top:12px"></div>
+        </div>
+        <div class="card">
+          <h3>Clone from Git</h3>
+          <div class="field"><label for="cUrl">Repository URL</label><input type="text" id="cUrl" placeholder="https://github.com/org/repo.git  or  git@github.com:org/repo.git"></div>
+          <div class="field"><label for="cBranch">Branch</label><input type="text" id="cBranch" placeholder="leave empty for the default branch"></div>
+          <div class="field"><label for="cParent">Clone into this folder</label>
+            <div class="row"><input type="text" id="cParent" placeholder="choose where to clone" readonly><button id="cChoose">Choose…</button></div></div>
+          <div class="field"><label for="cName">Folder name</label><input type="text" id="cName" placeholder="from the URL"></div>
+          <div class="row"><button class="primary" id="cGo" disabled>Clone and add</button><span class="small" id="cWhere"></span></div>
+          <div class="small" id="cSamples" style="margin-top:10px"></div>
+          <div class="log" id="cLog"></div>
+        </div>
+      </div>
+      <div class="row" style="margin-top:16px"><span class="spacer"></span><button class="primary" id="reposNext">Continue</button></div>
     </section>
 
     <section data-step="review">
@@ -229,23 +249,48 @@ function showRepos() {
   $("#repoList").innerHTML = repos.length ? repos.map((r,i) => `<div class="repo">
       <input type="text" value="${esc(r.name)}" data-i="${i}" class="rname" title="Short id for this repo">
       <span class="path">${esc(r.path)}</span><button class="link" data-rm="${i}">Remove</button></div>`).join("")
-    : `<p class="small">No repositories yet — add at least two, or create the playground repos to try it out.</p>`;
+    : `<p class="small">No repositories yet.</p>`;
   document.querySelectorAll(".rname").forEach(inp => inp.onchange = () => repos[+inp.dataset.i].name = inp.value.trim().replace(/[^A-Za-z0-9_-]+/g,"-"));
   document.querySelectorAll("[data-rm]").forEach(b => b.onclick = () => { repos.splice(+b.dataset.rm,1); showRepos(); });
   const sug = (S.suggestions||[]).filter(p => !repos.some(r => r.path === p));
-  $("#suggest").innerHTML = sug.length ? `<div class="small" style="margin-bottom:6px">Git repositories nearby</div>` +
+  showSamples(); cloneState();
+  $("#suggest").innerHTML = sug.length ? `<div class="small" style="margin-bottom:6px">Or one of these nearby repositories:</div>` +
     sug.map(p => `<div class="sugg"><span class="path">${esc(p)}</span><button class="link" data-add="${esc(p)}">Add</button></div>`).join("") : "";
   document.querySelectorAll("[data-add]").forEach(b => b.onclick = () => addRepo(b.dataset.add));
   $("#reposNext").disabled = repos.length < 2 || new Set(repos.map(r => r.name)).size !== repos.length;
 }
 $("#addRepo").onclick = () => pick(addRepo);
-$("#mkPlayground").onclick = async () => {
-  if (!confirm(`Create the two sample repos (pw-server, pw-client) in ${S.playground_dir}?\n\nAn existing playground there is replaced; nothing else is touched.`)) return;
-  $("#mkPlayground").disabled = true;
-  try { const res = await runJob(() => api("/api/playground", {dir:S.playground_dir, reset:true}), $("#pgLog")); res.repos.forEach(addRepo); }
-  catch (e) { $("#pgLog").textContent += "\n" + e.message; }
-  $("#mkPlayground").disabled = false;
+/* clone from Git: URL + branch, into a folder the user chooses */
+const urlName = u => (u.trim().replace(/[\/\\]+$/,"").split(/[\/:\\]/).pop() || "").replace(/\.git$/,"").replace(/[^A-Za-z0-9._-]+/g,"-");
+let nameTouched = false;
+function cloneState() {
+  if (!nameTouched) $("#cName").value = urlName($("#cUrl").value);
+  const ok = $("#cUrl").value.trim() && $("#cParent").value && $("#cName").value.trim();
+  $("#cGo").disabled = !ok || !S.git;
+  $("#cWhere").textContent = ok ? "→ " + $("#cParent").value.replace(/[\/\\]$/,"") + (S.home && S.home.includes("\\") ? "\\" : "/") + $("#cName").value.trim() : "";
+}
+$("#cUrl").oninput = cloneState; $("#cBranch").oninput = cloneState;
+$("#cName").oninput = () => { nameTouched = !!$("#cName").value; cloneState(); };
+$("#cChoose").onclick = () => pick(p => { $("#cParent").value = p; cloneState(); }, $("#cParent").value || S.home);
+$("#cGo").onclick = async () => {
+  $("#cGo").disabled = true;
+  try {
+    const res = await runJob(() => api("/api/clone", {url:$("#cUrl").value.trim(), branch:$("#cBranch").value.trim(),
+                                                      parent:$("#cParent").value, name:$("#cName").value.trim()}), $("#cLog"));
+    addRepo(res.path);
+    $("#cUrl").value = ""; $("#cBranch").value = ""; $("#cName").value = ""; nameTouched = false;  // keep the folder for the next one
+  } catch (e) { $("#cLog").style.display = "block"; $("#cLog").textContent += "\nERROR: " + e.message; }
+  cloneState();
 };
+function showSamples() {
+  if (!S.git) { $("#cSamples").innerHTML = `<span class="warn">Git is not installed — install it from git-scm.com to clone here, or clone the repos yourself and choose their folders.</span>`; return; }
+  $("#cSamples").innerHTML = "Trying it out? Playground repos: " + (S.samples||[]).map((x,i) =>
+    `<button class="link" data-sample="${i}">${esc(x.name)}</button>`).join(" · ") + ` <span class="small">(fills in the URL and branch)</span>`;
+  document.querySelectorAll("[data-sample]").forEach(b => b.onclick = () => {
+    const x = S.samples[+b.dataset.sample]; $("#cUrl").value = x.url; $("#cBranch").value = x.branch; nameTouched = false; cloneState();
+    if (!$("#cParent").value) $("#cChoose").click();
+  });
+}
 $("#reposNext").onclick = () => { scans = []; finish("repos","review"); };
 
 /* 4 review */

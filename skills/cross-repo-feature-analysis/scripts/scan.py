@@ -129,7 +129,7 @@ def analyze(name: str, root: Path) -> dict:
         except Exception:
             continue
         ifaces += [{"name": n.qualname, "file": rel,
-                    "operations": [c.name for c in n.children if c.kind == "idl_operation"]}
+                    "operations": [c.name for c in n.children if c.kind in ("idl_operation", "idl_attribute")]}
                    for n in tree.walk() if n.kind == "idl_interface"]
     out["idl_files"] = sum(1 for _, _, l in files if l == "idl")
     out["interfaces"] = ifaces
