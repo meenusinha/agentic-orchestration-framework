@@ -50,10 +50,26 @@ code,.mono{font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;font
 .cmd{display:flex;gap:8px;align-items:center;background:var(--code);border:1px solid var(--line);border-radius:8px;padding:6px 8px;margin:6px 0}
 .cmd code{flex:1;word-break:break-all}.err{color:var(--bad);margin-top:10px}
 .iface{border-left:3px solid var(--accent);padding:6px 12px;margin:10px 0}.small{font-size:12.5px;color:var(--muted)}
+.qbar{position:sticky;top:0;z-index:5;background:var(--panel);border-bottom:1px solid var(--line);padding:10px 28px;display:flex;gap:8px;align-items:center;flex-wrap:wrap}
+.qbar input{flex:1;min-width:240px}.qbar .hint{font-size:12px;color:var(--muted);width:100%}
+pre.src{font:12px/1.45 ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;background:var(--code);border:1px solid var(--line);border-radius:8px;padding:10px 12px;overflow:auto;max-height:420px;margin:6px 0}
+.unit{border:1px solid var(--line);border-radius:10px;padding:10px 14px;margin:10px 0}.unit .h{font-weight:600}
+details summary{cursor:pointer;color:var(--muted);font-size:12.5px}.saved{font-size:12.5px;color:var(--muted);margin:4px 0 12px}
+.hist{display:flex;justify-content:space-between;gap:10px;padding:6px 0;border-bottom:1px solid var(--line);font-size:13px}
+.hist:last-child{border-bottom:0}nav li.sep{border-top:1px solid var(--line);margin-top:8px;padding-top:14px}
 </style>
 </head>
 <body>
-<header><h1>Agentic Orchestration — Setup</h1><span class="fw" id="fw"></span></header>
+<header><h1>Agentic Orchestration</h1><span class="fw" id="fw"></span></header>
+<form class="qbar" id="qbar" autocomplete="off">
+  <select id="qmode" title="What kind of query">
+    <option value="search">Search</option><option value="trace">Trace interface</option><option value="impact">Impact of change</option>
+  </select>
+  <select id="qrepo" title="Which repositories"><option value="">All repositories</option></select>
+  <input type="text" id="qtext" placeholder="Ask about the code, e.g. which processes are affected if PWD_MIN_LEN changes?">
+  <button class="primary" id="qrun" type="submit">Run query</button>
+  <div class="hint" id="qhint"></div>
+</form>
 <div class="wrap">
   <nav><ol id="steps"></ol></nav>
   <main>
@@ -99,11 +115,18 @@ code,.mono{font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;font
     </section>
 
     <section data-step="verify">
-      <h2>6. Verify</h2>
-      <p class="sub">Builds every repository's code graph (the first build takes a while) and shows the interfaces and links it found.</p>
-      <div class="row"><button class="primary" id="verifyBtn">Build &amp; verify</button></div>
+      <h2>6. Create GraphRAG</h2>
+      <p class="sub" id="createAsk">Create the GraphRAG for these repositories now? It parses every repository into whole functions, classes and IDL operations, links them across repositories and builds the search index — locally, no AI service involved. The first build takes a while.</p>
+      <div class="row"><button class="primary" id="verifyBtn">Yes, create the GraphRAG</button></div>
       <div class="log" id="verifyLog"></div>
       <div id="verifyResult"></div>
+    </section>
+    <section data-step="queries">
+      <h2>Queries</h2>
+      <p class="sub">Use the query field at the top. Every result is also saved as a new Markdown file in <code id="resDir"></code> — earlier results are never overwritten.</p>
+      <div id="qresult"></div>
+      <h3 style="font-size:15px;margin-top:22px">Saved results</h3>
+      <div id="history" class="small">None yet.</div>
     </section>
   </main>
 </div>
@@ -116,7 +139,7 @@ code,.mono{font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;font
 
 <script>
 const T = new URLSearchParams(location.hash.slice(1)).get("t") || "";
-const STEPS = [["install","Install"],["model","Model"],["repos","Repositories"],["review","Review"],["configure","Configure"],["verify","Verify"]];
+const STEPS = [["install","Install"],["model","Model"],["repos","Repositories"],["review","Review"],["configure","Configure"],["verify","Create GraphRAG"]];
 const ROLES = ["interface","implementation","internal","external","library","test","build","generated","docs","tooling","config","data","example"];
 const KINDS = ["implementation","interface","server-config","config","docs","data","ignore"];
 const LANGS = ["c","cpp","python","idl","perl","matlab","java","javascript","typescript","go","rust","csharp","markdown","text"];
@@ -147,11 +170,12 @@ function nav() {
   $("#steps").innerHTML = STEPS.map(([k,l],i) => {
     const reach = i === 0 || done.has(STEPS[i-1][0]) || done.has(k);
     return `<li class="${k===cur?"active":""} ${done.has(k)?"done":""} ${reach?"reach":""}" data-k="${k}"><span class="dot">${done.has(k)?"✓":i+1}</span>${l}</li>`;
-  }).join("");
+  }).join("") + `<li class="sep ${cur==="queries"?"active":""} ${S.graph_ready?"reach":""}" data-k="queries"><span class="dot">?</span>Queries</li>`;
+  qbarState();
   document.querySelectorAll("nav li.reach").forEach(li => li.onclick = () => go(li.dataset.k));
   document.querySelectorAll("main section").forEach(s => s.classList.toggle("active", s.dataset.step === cur));
 }
-function go(k) { cur = k; nav(); ({model:showModel, repos:showRepos, review:showReview, configure:showConfigure})[k]?.(); window.scrollTo(0,0); }
+function go(k) { cur = k; nav(); ({model:showModel, repos:showRepos, review:showReview, configure:showConfigure, queries:showHistory})[k]?.(); window.scrollTo(0,0); }
 function finish(k, next) { done.add(k); go(next); }
 const status = (ok, text) => `<div class="status"><b class="${ok?"ok":"warn"}">${ok?"✓":"●"}</b>${text}</div>`;
 
@@ -298,7 +322,8 @@ $("#configureBtn").onclick = async () => {
 $("#verifyBtn").onclick = async () => {
   $("#verifyBtn").disabled = true; $("#verifyResult").innerHTML = "";
   try {
-    const res = await runJob(() => api("/api/verify", {}), $("#verifyLog")); done.add("verify"); nav();
+    const res = await runJob(() => api("/api/verify", {}), $("#verifyLog")); done.add("verify");
+    S = await api("/api/state"); fillRepoSelect(); nav();
     const rows = res.repos.map(r => `<tr><td><b>${esc(r.name)}</b></td><td>${r.files}</td><td>${r.units}</td><td>${r.links}</td>
       <td>${r.interfaces_defined.map(esc).join(", ") || "—"}</td><td>${r.unclassified.length ? `<span class="warn">${r.unclassified.map(esc).join(", ")}</span>` : "—"}</td></tr>`).join("");
     const ifs = res.interfaces.map(i => `<div class="iface"><b>${esc(i.interface)}</b> <span class="small">defined in ${esc(i.defined_in)} · ${i.operations.map(esc).join(", ")}</span>
@@ -306,19 +331,92 @@ $("#verifyBtn").onclick = async () => {
       <div class="small">called by: ${i.consumers.map(c => `${esc(c.repo)} / process ${esc(c.process)} (${esc(c.by)}${c.confidence < 0.8 ? ", confidence " + c.confidence : ""})`).join("; ") || "<span class='warn'>no caller found</span>"}</div></div>`).join("");
     const first = res.repos[res.repos.length - 1]?.path || "";
     const cmd = (t) => `<div class="cmd"><code>${esc(t)}</code><button data-c="${esc(t)}">Copy</button></div>`;
-    $("#verifyResult").innerHTML = `<div class="status"><b class="ok">✓</b>All repositories indexed and connected.</div>
+    $("#verifyResult").innerHTML = `<div class="status"><b class="ok">✓</b>GraphRAG created — all repositories indexed and connected. Ask a question with the query field at the top.</div>
       <table><tr><th>Repository</th><th>Files</th><th>Units</th><th>Links</th><th>IDL interfaces defined</th><th>Not indexed</th></tr>${rows}</table>
       <h3 style="font-size:15px;margin-top:18px">Interfaces between processes</h3>${ifs || "<p class='small'>No IDL interfaces found.</p>"}
       <h3 style="font-size:15px;margin-top:18px">Start using it</h3>
       <div class="small">Claude Code — approve the project MCP servers when asked:</div>${cmd(`cd "${first}" && claude`)}
       <div class="small">VS Code — allow the servers, start requests with /cross-repo-feature-analysis:</div>${cmd(`code "${first}"`)}
       <div class="small">Cursor: open the repo and enable the servers in Settings → MCP.</div>
-      <div class="row" style="margin-top:16px"><span class="spacer"></span><button id="quit">Close setup</button></div>`;
+      <div class="row" style="margin-top:16px"><button class="primary" id="toQueries">Run a query</button><span class="spacer"></span><button id="quit">Close</button></div>`;
+    $("#toQueries").onclick = () => { go("queries"); $("#qtext").focus(); };
     document.querySelectorAll("[data-c]").forEach(b => b.onclick = () => { navigator.clipboard?.writeText(b.dataset.c); b.textContent = "Copied"; });
     $("#quit").onclick = async () => { await api("/api/quit", {}); document.body.innerHTML = "<p style='padding:40px'>Setup closed. You can close this tab.</p>"; };
   } catch (e) { $("#verifyLog").textContent += "\n" + e.message; }
   $("#verifyBtn").disabled = false;
 };
+
+/* queries — always available once the GraphRAG exists */
+function fillRepoSelect() {
+  $("#qrepo").innerHTML = `<option value="">All repositories</option>` + (S.repos||[]).map(r => `<option>${esc(r.name)}</option>`).join("");
+}
+function qbarState() {
+  const ok = !!S.graph_ready; ["#qmode","#qrepo","#qtext","#qrun"].forEach(x => $(x).disabled = !ok);
+  $("#qhint").textContent = ok ? "" : "Queries become available once the GraphRAG is created (step 6).";
+  const ph = {search:"Ask about the code, e.g. what would it take to show the policy hint in the login dialog?",
+              trace:"Interface or operation name, e.g. IPasswordService or checkStrength",
+              impact:"Function, method or IDL operation, e.g. pwd_policy_check"};
+  $("#qtext").placeholder = ph[$("#qmode").value];
+}
+$("#qmode").onchange = qbarState;
+$("#qbar").onsubmit = async (ev) => {
+  ev.preventDefault(); const text = $("#qtext").value.trim(); if (!text) return;
+  go("queries"); $("#qrun").disabled = true;
+  $("#qresult").innerHTML = `<div class="status"><b class="warn">●</b>Running ${esc($("#qmode").selectedOptions[0].text.toLowerCase())}… (the first query loads the model and graphs)</div>`;
+  try {
+    const r = await api("/api/query", {mode:$("#qmode").value, text, repo:$("#qrepo").value});
+    $("#qresult").innerHTML = `<div class="saved">Saved to <code>${esc(r.saved)}</code> · ${r.seconds}s</div>` + render(r.mode, r.result);
+    showHistory();
+  } catch (e) { $("#qresult").innerHTML = `<p class="bad">${esc(e.message)}</p>`; }
+  $("#qrun").disabled = false;
+};
+const pre = (t) => `<pre class="src">${esc(t)}</pre>`;
+function unitHtml(n, parent, rel) {
+  const r = Object.entries(rel||{}).filter(([k]) => ["calls_operation","implements","tested_by","called_by","calls"].includes(k))
+    .map(([k,v]) => `<div class="small"><b>${esc(k.replace(/_/g," "))}:</b> ${v.slice(0,8).map(x => esc(x.name||x.qualname)).join(", ")}</div>`).join("");
+  return `<div class="unit"><div class="h">${esc(n.kind)} <code>${esc(n.qualname)}</code></div>
+    <div class="small">${esc(n.file)}:${n.lines[0]}–${n.lines[1]}${n.process ? " · process <b>"+esc(n.process)+"</b>" : ""} · ${esc(n.role)}${n.ifdef ? " · #if "+esc(n.ifdef) : ""}</div>
+    ${parent && parent.skeleton && parent.skeleton !== "(shown above)" ? `<details><summary>in ${esc(parent.kind||"")} ${esc(parent.qualname)}</summary>${pre(parent.skeleton)}</details>` : ""}
+    ${pre(n.text)}${r}</div>`;
+}
+function traceHtml(t) {
+  if (!t || !t.found) return `<p class="small">Interface ${esc(t && t.interface)} not found.</p>`;
+  const d = t.defined_in;
+  return `<div class="iface"><b>${esc(t.interface)}</b> <span class="small">defined in ${esc(d.repo)} · ${esc(d.file)}:${d.lines[0]}–${d.lines[1]}</span>
+    ${t.definition_text ? `<details><summary>IDL definition</summary>${pre(t.definition_text)}</details>` : ""}
+    ${(t.providers||[]).map(p => `<div class="small" style="margin-top:6px"><b>Served by</b> ${esc(p.repo)} / process <b>${esc(p.process||"-")}</b> — ${esc(p.server_class)}</div>` +
+      (p.operations||[]).map(o => `<details><summary>${esc(o.operation)} → ${esc(o.qualname||"")}${o.tested_by && o.tested_by.length ? " · tested by "+o.tested_by.map(x=>esc(x.test)).join(", ") : ""}</summary>${o.text ? pre(o.text) : ""}</details>`).join("")).join("")}
+    ${(t.consumers||[]).map(c => `<details><summary><b>Called by</b> ${esc(c.repo)} / process <b>${esc(c.process||"-")}</b> — ${esc(c.caller)} (${esc(c.operation||"")}${c.confidence < 0.8 ? ", confidence "+c.confidence : ""})</summary>${c.text ? pre(c.text) : ""}</details>`).join("")}
+    ${(t.checks||[]).length ? `<div class="small warn">Checks: ${t.checks.map(esc).join("; ")}</div>` : ""}</div>`;
+}
+function render(mode, r) {
+  if (mode === "search") {
+    return r.repos.map(x => `<h3 style="font-size:15px;margin:14px 0 4px">${esc(x.repo)}</h3>` +
+        (x.hits.length ? x.hits.map(h => unitHtml(h.node, h.parent, h.relations)).join("") : `<p class="small">No relevant units.</p>`) +
+        (x.more.length ? `<div class="small">More: ${x.more.map(m => esc(m.qualname)).join(", ")}</div>` : "")).join("") +
+      (r.interfaces.length ? `<h3 style="font-size:15px;margin-top:18px">Interfaces involved</h3>` + r.interfaces.map(traceHtml).join("") : "");
+  }
+  if (mode === "trace") return traceHtml(r.trace);
+  if (!r.impact.length) return `<p class="small">Symbol not found in any repository.</p>`;
+  return r.impact.map(x => `<h3 style="font-size:15px;margin:14px 0 4px">${esc(x.repo)}</h3>` +
+    (x.local||[]).map(l => `<div class="unit"><div class="h">${esc(l.node.kind)} <code>${esc(l.node.qualname)}</code> <span class="small">${esc(l.node.file)}</span></div>
+      <div class="small"><b>Callers:</b> ${l.callers.map(c => esc(c.qualname)+" (level "+c.level+")").join(", ") || "none"}</div>
+      <div class="small"><b>Tested by:</b> ${l.tested_by.map(t => esc(t.test)).join(", ") || "no test evidence"}</div>
+      <div class="small"><b>Processes:</b> ${l.processes.map(esc).join(", ") || "-"}</div></div>`).join("") +
+    (x.interfaces||[]).filter(t => t.found).map(t => `<div class="iface"><b>Through IDL ${esc(t.interface)}</b>${t.via ? " (via "+esc(t.via)+")" : ""}
+      <div class="small">Clients affected: ${t.consumers.map(c => esc(c.repo)+" / "+esc(c.process||"-")+" "+esc(c.caller)).join("; ") || "none found"}</div></div>`).join("")).join("");
+}
+async function showHistory() {
+  $("#resDir").textContent = S.results_dir || "results/";
+  try {
+    const h = await api("/api/results");
+    $("#history").innerHTML = h.results.length ? h.results.map(x => `<div class="hist"><span><code>${esc(x.name)}</code></span><span>${esc(x.time)} <button class="link" data-res="${esc(x.name)}">View</button></span></div>`).join("") : "None yet.";
+    document.querySelectorAll("[data-res]").forEach(b => b.onclick = async () => {
+      const m = await api("/api/result?name=" + encodeURIComponent(b.dataset.res));
+      $("#qresult").innerHTML = `<div class="saved">Saved result <code>${esc(m.name)}</code></div>${pre(m.markdown)}`; window.scrollTo(0,0);
+    });
+  } catch (e) { $("#history").textContent = e.message; }
+}
 
 /* folder picker */
 let pickCb = null, pickPath = "";
@@ -337,10 +435,11 @@ $("#pkSelect").onclick = () => { $("#picker").classList.remove("open"); pickCb &
 (async () => {
   try { S = await api("/api/state"); } catch (e) { document.body.innerHTML = `<p style="padding:40px" class="bad">Can't reach the setup service (${esc(e.message)}). Re-open the address printed in the terminal.</p>`; return; }
   $("#fw").textContent = S.framework;
-  repos = S.repos.slice();
+  repos = S.repos.slice(); fillRepoSelect();
   if (S.deps_ok) done.add("install");
   if (S.deps_ok && S.model_ok) done.add("model");
-  cur = !S.deps_ok ? "install" : !S.model_ok ? "model" : "repos";
+  if (S.deps_ok && S.model_ok && S.graph_ready) ["repos","review","configure","verify"].forEach(k => done.add(k));
+  cur = !S.deps_ok ? "install" : !S.model_ok ? "model" : S.graph_ready ? "queries" : "repos";
   showInstall(); nav(); go(cur);
 })();
 </script>

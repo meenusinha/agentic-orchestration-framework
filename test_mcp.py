@@ -8,8 +8,7 @@ Document formatted as markdown, ready to paste into Copilot chat.
 Usage (from repo root, with venv active):
   python test_mcp.py "your feature request here"
 
-Output is printed to stdout AND saved to feature_analysis.md
-Paste feature_analysis.md content into Copilot chat for analysis.
+Output is printed to stdout AND saved to a new file in results/ (never overwritten).
 """
 import os
 import sys
@@ -266,7 +265,10 @@ doc_lines += [
 document = "\n".join(doc_lines)
 
 # ── Output ────────────────────────────────────────────────────────────────────
-output_path = FRAMEWORK_DIR / "feature_analysis.md"
+sys.path.insert(0, str(FRAMEWORK_DIR / "repo-agent" / "mcp"))
+from codegraph.reports import unique_report_path  # noqa: E402
+# a new file per run (results/<date>_<time>_analysis_<question>.md) — earlier results are never overwritten
+output_path = unique_report_path(FRAMEWORK_DIR / "results", "analysis", feature_request)
 output_path.write_text(document, encoding="utf-8")
 
 _stop_streaming.set()
@@ -278,4 +280,4 @@ print(document)
 print(term.c(f"{'═'*60}", term.GRY))
 print(f"\n{term.c('Saved:', term.GRN)} {output_path}")
 print(f"{term.c('HTML log:', term.GRN)} file://{HTML_FILE}")
-print(f"\nPaste {term.c('feature_analysis.md', term.YEL)} into Copilot chat.")
+print(f"\nSaved to {term.c(str(output_path), term.YEL)}")

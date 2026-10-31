@@ -27,8 +27,9 @@ Score = `min(content_length / 800, 1.0)`, 0.0 if "no relevant knowledge found".
 ```
 agentic-orchestration-framework/
 ├── README.md                        ← user-facing setup guide (keep accurate)
-├── setup_gui.py                     ← local setup wizard (stdlib HTTP server, 127.0.0.1 + token) — install → model → repos → review → configure → verify
-├── gui/                             ← index.html (no external assets, CSP), verify.py (build + report)
+├── setup_gui.py                     ← local wizard + query UI (stdlib HTTP server, 127.0.0.1 + token): install → model → repos → review → configure → create GraphRAG → queries
+├── gui/                             ← index.html (no external assets, CSP), verify.py (build + report), query_worker.py (loads graphs once; search / trace / impact; no LLM)
+├── results/                         ← query reports, one new file per query (codegraph/reports.py: unique_report_path) — gitignored
 ├── playground/                      ← setup_playground.py, smoke_test.py, two sample repos
 ├── requirements.txt                 ← direct deps: mcp[cli]<2, sentence-transformers>=6, numpy, pyyaml
 ├── requirements.lock                ← hash-locked, universal (uv pip compile --generate-hashes)

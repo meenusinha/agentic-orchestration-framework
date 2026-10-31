@@ -18,6 +18,13 @@ python3 setup_gui.py
 ```
 
 In step 3 (Repositories) click **Create playground repos**, then click through the rest.
+After step 6 (Create GraphRAG), use the query field at the top, for example:
+
+- Search: `which processes are affected if PWD_MIN_LEN changes?`
+- Trace interface: `IPasswordService`
+- Impact of change: `pwd_policy_check`
+
+Each result is saved as a new file in `<framework>/results/`.
 
 ## Run it from scratch (command line)
 

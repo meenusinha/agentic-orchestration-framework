@@ -102,6 +102,67 @@ def stream(job: Job, cmd, env=None) -> int:
     return p.wait()
 
 
+# ── query worker: loads the model + graphs once, answers queries (no LLM) ────
+class QueryWorker:
+    def __init__(self):
+        self.proc, self.lock, self.next_id, self.repos = None, threading.Lock(), 1, []
+
+    def _start(self):
+        self.proc = subprocess.Popen([sys.executable, str(GUI / "query_worker.py")], stdin=subprocess.PIPE,
+                                     stdout=subprocess.PIPE, stderr=subprocess.DEVNULL, text=True, bufsize=1)
+        ready = json.loads(self.proc.stdout.readline() or '{"ready": false, "error": "worker exited"}')
+        if not ready.get("ready"):
+            self.stop()
+            raise RuntimeError(ready.get("error", "query worker failed to start"))
+        self.repos = ready["repos"]
+
+    def ask(self, mode, text, repo) -> dict:
+        with self.lock:
+            if self.proc is None or self.proc.poll() is not None:
+                self._start()
+            rid, self.next_id = self.next_id, self.next_id + 1
+            self.proc.stdin.write(json.dumps({"id": rid, "mode": mode, "text": text, "repo": repo}) + "\n")
+            self.proc.stdin.flush()
+            line = self.proc.stdout.readline()
+            if not line:
+                self.stop()
+                raise RuntimeError("query worker stopped unexpectedly")
+            return json.loads(line)
+
+    def stop(self):
+        if self.proc is not None:
+            try:
+                self.proc.kill()
+            except OSError:
+                pass
+        self.proc = None
+
+
+WORKER = QueryWorker()
+RESULTS = FW / "results"
+
+
+def graph_ready() -> bool:
+    repos = configured_repos()
+    return bool(repos) and all((Path(r["path"]).expanduser() / ".rag_index" / "interfaces.json").exists()
+                               for r in repos)
+
+
+def list_results() -> list:
+    if not RESULTS.is_dir():
+        return []
+    files = sorted(RESULTS.glob("*.md"), key=lambda f: f.stat().st_mtime, reverse=True)
+    return [{"name": f.name, "size": f.stat().st_size,
+             "time": time.strftime("%Y-%m-%d %H:%M:%S", time.localtime(f.stat().st_mtime))} for f in files[:200]]
+
+
+def read_result(name: str) -> str:
+    f = (RESULTS / name).resolve()
+    if f.parent != RESULTS.resolve() or f.suffix != ".md" or not f.is_file():   # no path traversal
+        raise ValueError("no such result")
+    return f.read_text(encoding="utf-8")
+
+
 # ── state ─────────────────────────────────────────────────────────────────────
 def deps_ok() -> bool:
     return subprocess.run([sys.executable, "-c", "import mcp, sentence_transformers, tree_sitter, yaml"],
@@ -142,6 +203,7 @@ def state() -> dict:
     return {"framework": str(FW), "python": sys.executable, "in_venv": sys.prefix != sys.base_prefix,
             "deps_ok": ok, "model_ok": (MODEL_DIR / "model.safetensors").exists(), "model_dir": str(MODEL_DIR),
             "model_copies": copies, "repos": configured_repos(), "suggestions": suggestions(),
+            "graph_ready": graph_ready(), "results_dir": str(RESULTS),
             "home": str(Path.home()), "playground_dir": str(Path.home() / "ao-playground")}
 
 
@@ -174,6 +236,7 @@ def scan(repos: list) -> list:
 
 def job_configure(body):
     def run(job):
+        WORKER.stop()                                   # configuration changes → reload graphs on next query
         cmd = [sys.executable, SCRIPTS / "configure.py", "--framework", FW]
         for r in body["repos"]:
             n = r["name"]
@@ -205,7 +268,8 @@ def job_verify(job):
     p.wait()
     if not result or not result.get("ok"):
         raise RuntimeError((result or {}).get("error") or "verification failed")
-    job.log("✓ code graphs built and linked")
+    job.log("✓ GraphRAG created and linked")
+    WORKER.stop()                                       # next query loads the fresh graphs
     return result
 
 
@@ -284,6 +348,14 @@ class Handler(BaseHTTPRequestHandler):
                 return self._send(200, state())
             if u.path == "/api/fs":
                 return self._send(200, list_dir(q.get("path", [""])[0]))
+            if u.path == "/api/results":
+                return self._send(200, {"results": list_results(), "dir": str(RESULTS)})
+            if u.path == "/api/result":
+                name = q.get("name", [""])[0]
+                try:
+                    return self._send(200, {"name": name, "markdown": read_result(name)})
+                except (ValueError, OSError):
+                    return self._send(404, {"error": "no such result"})
             if u.path.startswith("/api/job/"):
                 job = JOBS.get(u.path.rsplit("/", 1)[1])
                 if job is None:
@@ -315,7 +387,16 @@ class Handler(BaseHTTPRequestHandler):
                 return self._send(200, {"job": start_job("Verify", job_verify)})
             if u.path == "/api/playground":
                 return self._send(200, {"job": start_job("Playground", job_playground(body))})
+            if u.path == "/api/query":
+                if not graph_ready():
+                    return self._send(409, {"error": "Create the GraphRAG first (step 6)"})
+                mode = body.get("mode", "search")
+                if mode not in ("search", "trace", "impact"):
+                    return self._send(400, {"error": "unknown query mode"})
+                r = WORKER.ask(mode, str(body.get("text", ""))[:2000], str(body.get("repo", "")))
+                return self._send(200 if r.get("ok") else 400, r if r.get("ok") else {"error": r.get("error")})
             if u.path == "/api/quit":
+                WORKER.stop()
                 self._send(200, {"ok": True})
                 threading.Thread(target=lambda: (time.sleep(0.3), os._exit(0)), daemon=True).start()
                 return None

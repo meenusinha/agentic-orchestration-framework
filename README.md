@@ -7,7 +7,7 @@ them, and produces a Feature Analysis Document grounded in the actual code.
 
 ---
 
-## Quick start — setup GUI (no AI agent needed)
+## Quick start — one command, no AI agent needed
 
 ```bash
 git clone -b add-agent-skill https://github.com/meenusinha/agentic-orchestration-framework.git
@@ -15,17 +15,37 @@ cd agentic-orchestration-framework
 python3 setup_gui.py          # Windows: py setup_gui.py
 ```
 
-A local page opens in your browser and walks through six steps, a click or two each:
-**Install** (hash-verified packages into the framework's own venv) → **Model** (use a copy
-you have, or download it) → **Repositories** (pick folders, or create the two playground
-repos) → **Review** (processes, IDL interfaces and folder roles found by the scan; tell it
-what unknown file types contain) → **Configure** → **Verify** (builds every code graph and
-shows which processes serve and call each interface). It needs only Python 3.11+, uses
-the standard library until it has installed the rest, listens on 127.0.0.1 only and
-requires a per-session token.
+It creates its own virtual environment (`.venv`) and opens a local page in your browser:
 
-Prefer the command line? See the steps below, `playground/setup_playground.py`, or the
-agent-guided setup in `skills/cross-repo-feature-analysis/references/setup.md`.
+1. **Install**: hash-verified packages into `.venv`
+2. **Model**: use a copy you have, or download it (~95 MB)
+3. **Repositories**: pick folders, or create the two playground repos
+4. **Review**: the processes, IDL interfaces and folder roles the scan found; say what
+   unknown file types contain
+5. **Configure**
+6. **Create GraphRAG**: asks before building; then shows which processes serve and call
+   each interface
+
+The page then stays open with a **query field at the top**:
+
+| Mode | Type | You get |
+|---|---|---|
+| Search | a question | the most relevant whole functions, classes, IDL operations and doc sections from every repo, plus the interfaces they touch |
+| Trace interface | an interface or operation name | its IDL definition, the process serving it, and every caller across repos |
+| Impact of change | a function, method or operation | callers, test evidence, affected processes, and clients in other repos |
+
+Every result is also saved as a **new** Markdown file in `results/`
+(e.g. `2026-10-31_142305_search_policy-hint-login.md`); earlier results are never
+overwritten. Running `python3 setup_gui.py` again goes straight to the queries.
+
+No AI agent or LLM is used for any of this: parsing, linking, embedding (local model)
+and search all run on your machine. The page listens on 127.0.0.1 only and requires a
+per-session token. An AI assistant (Claude Code, Copilot, Cursor) is optional, for
+turning the results into a design document through the MCP servers.
+
+Prefer the command line? `test_mcp.py "your question"` writes a new report in
+`results/` too; see also `playground/setup_playground.py` and
+`skills/cross-repo-feature-analysis/references/setup.md`.
 
 ---
 
@@ -84,7 +104,7 @@ Both ways run the same agent pipeline. The difference is how you trigger it.
 | **Trigger** | `python test_mcp.py "feature request"` | Type in Copilot Chat (Agent mode) |
 | **VS Code required** | No | Yes |
 | **GitHub Copilot required** | No | Yes |
-| **Output** | `feature_analysis.md` file | Copilot synthesises inline in chat |
+| **Output** | a new file in `results/` per run | Copilot synthesises inline in chat |
 | **Best for** | Quick tests, demos, CI, no IDE | Day-to-day development workflow |
 | **Extra setup needed** | None beyond steps 1–4 | Run `setup.py` + open VS Code (steps 5–6) |
 
@@ -276,7 +296,7 @@ Once steps 1–4 are complete, you can run the full agent pipeline from the term
 no VS Code, no Copilot extension needed.
 
 `test_mcp.py` drives all three phases (preflight → routing → per-repo RAG) and writes
-`feature_analysis.md` ready to paste into any LLM or Copilot chat.
+a new report in `results/` (never overwritten), ready to paste into any LLM or Copilot chat.
 
 ### The three phases
 
@@ -293,7 +313,7 @@ python test_mcp.py "your feature request"
          │
          └── Phase 2 · Query all repos
                 Queries own repo + all peer repos for the full knowledge set.
-                Writes everything to feature_analysis.md.
+                Writes everything to a new file in results/.
 ```
 
 ### Run it
@@ -330,12 +350,12 @@ python test_mcp.py "add real-time validation feedback to the login form"
 [12:34:01.940] [backend     ] [RAG      ] Searching docs (top_k=3) + source code (top_k=3)...
 [12:34:02.110] [payments    ] [RAG      ] Searching docs (top_k=3) + source code (top_k=3)...
 
-✅  feature_analysis.md written
+✅  Saved to results/<date>_<time>_analysis_<question>.md
 ```
 
 ### What you get
 
-`feature_analysis.md` in the working directory — a cross-repo document with routing
+A new file in `results/` (e.g. `2026-10-31_142305_analysis_add-password-hint.md`) — a cross-repo document with routing
 scores, relevant knowledge from every repo, and instructions for an LLM to generate a
 Solution Design. Paste it straight into Copilot Chat or any other LLM.
 

@@ -7,3 +7,4 @@ feature_analysis.md
 # embedding model files (fetched by setup, never committed)
 models/*/*
 !models/*/.gitkeep
+results/

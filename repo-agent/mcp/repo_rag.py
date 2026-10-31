@@ -111,6 +111,9 @@ def neutralise(obj):
     return obj
 
 
+_MODELS: dict = {}
+
+
 class RepoRAG:
     def __init__(self, repo_name: str, repo_root: str, roots: list, embedding_model: str,
                  file_types: dict = None, structure: list = None, extra_extensions: list = None,
@@ -126,10 +129,13 @@ class RepoRAG:
         self._model_sha = verify_model_dir(embedding_model)
         log(repo_name, "INDEX", f"Model approved ({APPROVED_MODELS.get(self._model_sha, 'opt-in')}, "
                                 f"sha256 {self._model_sha[:12]}…) — loading offline")
-        import torch
-        from sentence_transformers import SentenceTransformer
-        self._model = SentenceTransformer(str(embedding_model), local_files_only=True, trust_remote_code=False,
-                                          model_kwargs={"dtype": torch.float32})
+        key = (str(Path(embedding_model).resolve()), self._model_sha)
+        if key not in _MODELS:             # one loaded copy per process, shared by every repo it serves
+            import torch
+            from sentence_transformers import SentenceTransformer
+            _MODELS[key] = SentenceTransformer(str(embedding_model), local_files_only=True,
+                                               trust_remote_code=False, model_kwargs={"dtype": torch.float32})
+        self._model = _MODELS[key]
         self.store = None
         self.search = None
 
