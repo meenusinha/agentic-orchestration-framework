@@ -4,6 +4,7 @@ config says and check the cross-repo results. Usage: smoke_test.py <pw-client>/.
 import asyncio
 import json
 import sys
+import time
 from pathlib import Path
 
 from mcp import ClientSession, StdioServerParameters
@@ -16,7 +17,10 @@ for _s in (sys.stdout, sys.stderr):      # Windows consoles/pipes default to cp1
 CFG = json.loads(Path(sys.argv[1]).read_text())["mcpServers"]
 
 
-async def call(server, tool, args):
+TIMEOUT = 300      # seconds per call — a hang reports which server and tool instead of waiting forever
+
+
+async def _call(server, tool, args):
     c = CFG[server]
     async with stdio_client(StdioServerParameters(command=c["command"], args=c["args"], env=c["env"])) as (r, w), \
             ClientSession(r, w) as s:
@@ -26,6 +30,18 @@ async def call(server, tool, args):
         if isinstance(out, dict) and set(out) == {"result"}:
             out = out["result"]
         return out
+
+
+async def call(server, tool, args):
+    t0 = time.time()
+    print(f"   … {server}.{tool}", flush=True)
+    try:
+        out = await asyncio.wait_for(_call(server, tool, args), TIMEOUT)
+    except asyncio.TimeoutError:
+        print(f"   FAIL  {server}.{tool} did not answer within {TIMEOUT}s", flush=True)
+        sys.exit(1)
+    print(f"     {time.time() - t0:.1f}s", flush=True)
+    return out
 
 
 CHECKS = []

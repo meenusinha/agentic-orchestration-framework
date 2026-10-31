@@ -80,4 +80,10 @@ def get_relevant_repos(requesting_repo: str, feature_description: str) -> str:
 
 
 if __name__ == "__main__":
+    # Load the embedding model now, on the main thread. FastMCP runs tool calls in a worker
+    # thread, and a first `import torch` from a worker thread can deadlock on Windows.
+    try:
+        router._embedder()
+    except Exception as e:                      # routing falls back to query_repo when the model is unusable
+        log("orchestrator_router", "WARN", f"embedding model not loaded at startup: {e}")
     mcp.run(transport="stdio")

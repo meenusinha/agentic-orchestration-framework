@@ -41,10 +41,12 @@ jobs:
           "$HFPY" -c "from huggingface_hub import snapshot_download as d; d('ibm-granite/granite-embedding-small-english-r2', revision='2ab6fa8ea2d674564defd37171ae19079b864b33', allow_patterns=['*.json', 'model.safetensors', '1_Pooling/*'], local_dir=r'${{ runner.temp }}/granite')"
 
       - name: GUI end-to-end self-test
+        timeout-minutes: 30
         shell: bash
         run: python playground/gui_selftest.py --model-from "${{ runner.temp }}/granite"
 
       - name: MCP servers end-to-end (playground smoke test)
+        timeout-minutes: 15
         shell: bash
         run: |
           if [ -x .venv/Scripts/python.exe ]; then PY=.venv/Scripts/python.exe; else PY=.venv/bin/python; fi
