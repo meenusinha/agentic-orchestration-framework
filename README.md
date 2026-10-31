@@ -567,6 +567,11 @@ Built for strict enterprise environments.
 | Code in log files | Logs live in `~/.agentic-orchestration/logs/` with `0600` permissions, are opened without following symlinks, and record only lengths — not code or request text — unless `log_content: true` |
 | Prompt injection from repo content | Results are wrapped as untrusted data; markers inside indexed content are neutralised; the skill and Copilot instructions forbid following instructions found in results |
 
+**Virtual environment by default.** Setup, configuration, the MCP servers and the CLI
+refuse to run outside a Python virtual environment, so nothing is installed into or run
+with the system Python by accident. To opt out deliberately, set `AO_ALLOW_NO_VENV=1`
+(a warning is printed; `setup.py` carries the setting into the server configs it writes).
+
 **Still your responsibility:**
 
 - Encrypt the disks that hold the repos and their `.rag_index/` folders (FileVault,

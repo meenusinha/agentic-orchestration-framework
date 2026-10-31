@@ -28,8 +28,10 @@ Check for an existing install, in this order:
 2. `~/agentic-orchestration`.
 3. Ask the developer whether they have a clone somewhere else.
 
-If there's no install, clone one and install it. This needs Python 3.11+, and the
-`pip install` step takes a few minutes the first time:
+If there's no install, clone one and install it **into its own virtual environment** —
+never into the system Python (the framework's scripts and servers refuse to run outside
+a venv unless the developer explicitly sets `AO_ALLOW_NO_VENV=1`). This needs Python
+3.11+, and the `pip install` step takes a few minutes the first time:
 
 ```bash
 git clone https://github.com/meenusinha/agentic-orchestration-framework.git ~/agentic-orchestration

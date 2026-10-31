@@ -25,6 +25,10 @@ python3 playground/setup_playground.py --download-model
   Already have it? Use `--model-from /path/to/granite-embedding-small-english-r2` instead.
 - `--dir PATH` puts the two repos somewhere other than `~/ao-playground`.
 - `--reset` starts over (it only ever deletes a folder it created).
+- Everything runs inside the framework's virtual environment (`.venv`): the script
+  creates it with the standard library only, then re-launches itself inside it, so
+  nothing is installed into your system Python. `--no-venv` opts out deliberately and
+  installs into the Python you ran it with.
 
 The script creates the two repos, installs the hash-locked requirements into `.venv`,
 scans and configures both repos (answering the scan's questions the way a developer

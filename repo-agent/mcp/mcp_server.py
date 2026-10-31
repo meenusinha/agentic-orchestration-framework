@@ -13,6 +13,23 @@ import time
 from pathlib import Path
 from typing import Annotated
 
+def _require_venv(what: str) -> None:
+    """The framework installs, configures and runs inside a Python virtual environment by
+    default. Set AO_ALLOW_NO_VENV=1 to override deliberately (a warning is printed)."""
+    if sys.prefix == sys.base_prefix:
+        import os
+        if os.environ.get("AO_ALLOW_NO_VENV", "").strip().lower() in ("1", "true", "yes"):
+            print(f"WARNING: {what} is running outside a virtual environment ({sys.executable}) "
+                  "because AO_ALLOW_NO_VENV is set.", file=sys.stderr)
+            return
+        sys.exit(f"ERROR: {what} must run inside a Python virtual environment (venv).\n"
+                 f"       Create it once:  python3 -m venv <framework>/.venv\n"
+                 f"       Then use:        <framework>/.venv/bin/python …   "
+                 f"(Windows: <framework>\\.venv\\Scripts\\python.exe)\n"
+                 f"       To run without a venv on purpose, set AO_ALLOW_NO_VENV=1.")
+
+_require_venv("the repo MCP server")
+
 sys.path.insert(0, str(Path(__file__).parent))
 
 try:

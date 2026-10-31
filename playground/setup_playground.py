@@ -8,9 +8,14 @@ Playground: two sample repos wired up from scratch, to try the framework end to 
   pw-client  — ui-shell process: C++ and C clients, Python/MATLAB/Perl tools, and an
                in-house .xidl callback interface it implements and the server calls
 
+Everything runs inside the framework's virtual environment (<framework>/.venv): the
+script creates it if needed using only the standard library, then re-launches itself
+inside it, so nothing is ever installed into your system Python. To deliberately use
+the current interpreter instead, pass --no-venv.
+
 Steps (each prints what it does):
   1. create the two repos as git repos in --dir (default ~/ao-playground)
-  2. create <framework>/.venv and install the hash-locked requirements
+  2. install the hash-locked requirements into the venv
   3. check the embedding model (copy with --model-from, or --download-model)
   4. scan both repos and configure them        (skipped with --guided)
   5. smoke-test through real MCP servers         (skipped with --guided)
@@ -21,6 +26,7 @@ Usage (from the framework clone, with Python 3.11+):
   python3 playground/setup_playground.py --model-from /path/to/granite-embedding-small-english-r2
   python3 playground/setup_playground.py --guided        # let the agent do steps 4–5 with you
   python3 playground/setup_playground.py --reset ...     # start over (only deletes a playground dir)
+  python3 playground/setup_playground.py --no-venv ...   # opt out of the venv (installs into this Python)
 """
 import argparse
 import json
@@ -79,16 +85,29 @@ def make_repos(base: Path, reset: bool):
         print(f"   ✓ {dst}")
 
 
-def ensure_venv():
+def in_framework_venv() -> bool:
+    return sys.prefix != sys.base_prefix and Path(sys.prefix).resolve() == (FW / ".venv").resolve()
+
+
+def enter_venv() -> None:
+    """Create <framework>/.venv if needed (standard library only) and re-run this script inside it."""
     py = venv_python()
     if not py.exists():
+        print(f"━━ 0. Create the virtual environment {FW / '.venv'}", flush=True)
         run([sys.executable, "-m", "venv", FW / ".venv"], check=True)
-    probe = subprocess.run([str(py), "-c", "import mcp, sentence_transformers, tree_sitter, yaml"],
+    print(f"   → continuing inside the venv: {py}", flush=True)
+    sys.exit(subprocess.call([str(py), str(Path(__file__).resolve()), *sys.argv[1:]]))
+
+
+def ensure_deps():
+    """Install the hash-locked requirements into the interpreter running this script."""
+    probe = subprocess.run([sys.executable, "-c", "import mcp, sentence_transformers, tree_sitter, yaml"],
                            capture_output=True)
     if probe.returncode != 0:
-        run([py, "-m", "pip", "install", "--quiet", "--require-hashes", "-r", FW / "requirements.lock"], check=True)
-    print(f"   ✓ {py}")
-    return py
+        run([sys.executable, "-m", "pip", "install", "--quiet", "--timeout", "60", "--retries", "5",
+             "--require-hashes", "-r", FW / "requirements.lock"], check=True)
+    print(f"   ✓ {sys.executable}")
+    return Path(sys.executable)
 
 
 def model_flags(args, py) -> list:
@@ -113,15 +132,23 @@ def main():
     ap.add_argument("--model-from", help="copy the approved embedding model from this folder")
     ap.add_argument("--download-model", action="store_true", help="download the embedding model (~95 MB)")
     ap.add_argument("--guided", action="store_true", help="stop after creating repos: let the agent configure")
+    ap.add_argument("--no-venv", action="store_true",
+                    help="opt out: install into and run with the current Python instead of <framework>/.venv")
     args = ap.parse_args()
+    if args.no_venv:
+        os.environ["AO_ALLOW_NO_VENV"] = "1"          # inherited by configure.py, setup.py and the servers
+        print(f"WARNING: --no-venv: installing into and running with {sys.executable}", flush=True)
+    elif not in_framework_venv():
+        enter_venv()
     base = Path(args.dir).expanduser().resolve()
     server, client = base / "pw-server", base / "pw-client"
 
     step(1, f"Create the sample repos in {base}")
     make_repos(base, args.reset)
 
-    step(2, "Python environment (hash-verified install)")
-    py = ensure_venv()
+    step(2, "Install requirements into " + ("the current Python" if args.no_venv else "the venv") +
+         " (hash-verified)")
+    py = ensure_deps()
 
     if args.guided:
         dst = client / ".claude" / "skills" / SKILL.name

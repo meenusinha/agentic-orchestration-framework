@@ -22,6 +22,23 @@ import sys
 from pathlib import Path
 from textwrap import dedent
 
+def _require_venv(what: str) -> None:
+    """The framework installs, configures and runs inside a Python virtual environment by
+    default. Set AO_ALLOW_NO_VENV=1 to override deliberately (a warning is printed)."""
+    if sys.prefix == sys.base_prefix:
+        import os
+        if os.environ.get("AO_ALLOW_NO_VENV", "").strip().lower() in ("1", "true", "yes"):
+            print(f"WARNING: {what} is running outside a virtual environment ({sys.executable}) "
+                  "because AO_ALLOW_NO_VENV is set.", file=sys.stderr)
+            return
+        sys.exit(f"ERROR: {what} must run inside a Python virtual environment (venv).\n"
+                 f"       Create it once:  python3 -m venv <framework>/.venv\n"
+                 f"       Then use:        <framework>/.venv/bin/python …   "
+                 f"(Windows: <framework>\\.venv\\Scripts\\python.exe)\n"
+                 f"       To run without a venv on purpose, set AO_ALLOW_NO_VENV=1.")
+
+_require_venv("orchestrator/setup.py")
+
 try:
     import yaml
 except ImportError:
@@ -91,6 +108,13 @@ def _peers_env() -> str:
     return json.dumps([{"name": r["name"], "path": str(r["path"])} for r in resolved])
 
 
+def _venv_override() -> dict:
+    """Setup ran outside a venv on purpose → let the servers it configures do the same."""
+    import os
+    flag = os.environ.get("AO_ALLOW_NO_VENV", "").strip().lower() in ("1", "true", "yes")
+    return {"AO_ALLOW_NO_VENV": "1"} if flag and sys.prefix == sys.base_prefix else {}
+
+
 def _all_servers() -> dict:
     """Full servers dict: orchestrator + every repo."""
     servers = {
@@ -104,6 +128,7 @@ def _all_servers() -> dict:
                 "DEMO_LOG_CONTENT": log_content,
                 "EMBEDDING_MODEL_PATH": MODEL_PATH,
                 "AO_PEERS": _peers_env(),
+                **_venv_override(),
             },
         }
     }
@@ -118,6 +143,7 @@ def _all_servers() -> dict:
                 "DEMO_LOG_CONTENT": log_content,
                 "EMBEDDING_MODEL_PATH": MODEL_PATH,
                 "AO_PEERS": _peers_env(),
+                **_venv_override(),
             },
         }
     return servers
