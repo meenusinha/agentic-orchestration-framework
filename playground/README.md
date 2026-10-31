@@ -93,3 +93,14 @@ contain, asks about the embedding model, and configures everything.
   e.g. *"not implemented by any provider: isCompromised"* until the servant implements it.
 - `tail -f ~/.agentic-orchestration/logs/mcp-orchestration.log` shows every tool call
   (code text is hidden unless `log_content: true` in `orchestrator/mcp/config.yaml`).
+
+## Automated end-to-end test (Windows, macOS, Linux)
+
+```bash
+python playground/gui_selftest.py --model-from <folder holding the model>
+```
+
+Starts the setup GUI as a user would and performs every step through its API (install,
+model copy, playground repos, scan, configure, GraphRAG, queries, restart), plus the
+security guards — 37 checks. GitHub Actions runs it on Windows, macOS and Linux
+(`.github/workflows/gui.yml`).

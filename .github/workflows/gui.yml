@@ -1,0 +1,53 @@
+name: setup-gui
+
+# End-to-end test of the setup GUI on Windows, macOS and Linux:
+# install → copy model → playground repos → scan → configure → GraphRAG → queries.
+on:
+  push:
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  gui:
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [windows-latest, macos-latest, ubuntu-latest]
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      # The test needs a copy of the approved model to point the GUI at. CI fetches it at the
+      # pinned revision; the GUI then checks it against the pinned SHA-256 like any copy.
+      - uses: actions/cache@v4
+        id: model
+        with:
+          path: ${{ runner.temp }}/granite
+          key: granite-embedding-small-english-r2-2ab6fa8ea2d674564defd37171ae19079b864b33
+      - name: Fetch the model copy (CI only)
+        if: steps.model.outputs.cache-hit != 'true'
+        shell: bash
+        run: |
+          python -m venv "$RUNNER_TEMP/hf"
+          if [ -x "$RUNNER_TEMP/hf/Scripts/python.exe" ]; then HFPY="$RUNNER_TEMP/hf/Scripts/python.exe"; else HFPY="$RUNNER_TEMP/hf/bin/python"; fi
+          "$HFPY" -m pip install -q "huggingface_hub>=0.34,<2"
+          "$HFPY" -c "from huggingface_hub import snapshot_download as d; d('ibm-granite/granite-embedding-small-english-r2', revision='2ab6fa8ea2d674564defd37171ae19079b864b33', allow_patterns=['*.json', 'model.safetensors', '1_Pooling/*'], local_dir=r'${{ runner.temp }}/granite')"
+
+      - name: GUI end-to-end self-test
+        shell: bash
+        run: python playground/gui_selftest.py --model-from "${{ runner.temp }}/granite"
+
+      - name: MCP servers end-to-end (playground smoke test)
+        shell: bash
+        run: |
+          if [ -x .venv/Scripts/python.exe ]; then PY=.venv/Scripts/python.exe; else PY=.venv/bin/python; fi
+          MCP=$(ls -d "$RUNNER_TEMP"/ao-selftest-*/ao-playground/pw-client/.mcp.json 2>/dev/null || true)
+          if [ -z "$MCP" ]; then MCP=$(python -c "import tempfile,glob;print(glob.glob(tempfile.gettempdir()+'/ao-selftest-*/ao-playground/pw-client/.mcp.json')[0])"); fi
+          "$PY" playground/smoke_test.py "$MCP"

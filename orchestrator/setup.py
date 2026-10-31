@@ -128,6 +128,7 @@ def _all_servers() -> dict:
                 "DEMO_LOG_CONTENT": log_content,
                 "EMBEDDING_MODEL_PATH": MODEL_PATH,
                 "AO_PEERS": _peers_env(),
+                "PYTHONUTF8": "1",
                 **_venv_override(),
             },
         }
@@ -143,6 +144,7 @@ def _all_servers() -> dict:
                 "DEMO_LOG_CONTENT": log_content,
                 "EMBEDDING_MODEL_PATH": MODEL_PATH,
                 "AO_PEERS": _peers_env(),
+                "PYTHONUTF8": "1",
                 **_venv_override(),
             },
         }

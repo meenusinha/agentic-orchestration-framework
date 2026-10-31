@@ -7,6 +7,7 @@ Fallback for repos whose index does not exist yet: spawn the repo's MCP server
 and score its query_repo answer (the original method). Config: config.yaml.
 """
 import json
+import os
 import subprocess
 import sys
 from pathlib import Path
@@ -35,6 +36,7 @@ def _mcp_call(server_script: str, tool_name: str, arguments: dict, timeout: int 
         proc = subprocess.run(
             [python, server_script],
             input=payload, capture_output=True, text=True, timeout=timeout,
+            encoding="utf-8", errors="replace", env={**os.environ, "PYTHONUTF8": "1"},
         )
     except subprocess.TimeoutExpired:
         return "(MCP timeout)"

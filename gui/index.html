@@ -422,7 +422,8 @@ async function pick(cb, start) { pickCb = cb; await browse(start || pickPath || 
 async function browse(p) {
   const d = await api("/api/fs?path=" + encodeURIComponent(p)); pickPath = d.path;
   $("#pkPath").textContent = d.path; $("#pkUp").disabled = !d.parent; $("#pkUp").onclick = () => browse(d.parent);
-  $("#pkHint").textContent = d.git ? "This folder is a git repository." : "";
+  $("#pkHint").textContent = d.git ? "This folder is a git repository." : (d.pickable === false ? "Choose a drive." : "");
+  $("#pkSelect").disabled = d.pickable === false;
   $("#pkList").innerHTML = d.dirs.map(x => `<div class="dir" data-p="${esc(x.path)}">📁 ${esc(x.name)} ${x.git ? '<span class="badge">git</span>' : ""}</div>`).join("") || "<p class='small' style='padding:8px'>No sub-folders.</p>";
   document.querySelectorAll(".dir").forEach(el => el.onclick = () => browse(el.dataset.p));
 }

@@ -15,6 +15,8 @@ cd agentic-orchestration-framework
 python3 setup_gui.py          # Windows: py setup_gui.py
 ```
 
+Works on Windows, macOS and Linux with Python 3.11+. Git is optional.
+
 It creates its own virtual environment (`.venv`) and opens a local page in your browser:
 
 1. **Install**: hash-verified packages into `.venv`

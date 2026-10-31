@@ -57,13 +57,20 @@ def venv_python() -> Path:
     return FW / ".venv" / ("Scripts/python.exe" if WIN else "bin/python")
 
 
+def _force_remove(func, path, _exc):
+    """shutil.rmtree helper: git marks object files read-only, which Windows refuses to delete."""
+    import stat
+    os.chmod(path, stat.S_IWRITE)
+    func(path)
+
+
 def make_repos(base: Path, reset: bool):
     if base.exists() and any(base.iterdir()):
         if not (base / MARKER).exists():
             sys.exit(f"ERROR: {base} exists and is not a playground folder — choose another --dir")
         if not reset:
             sys.exit(f"ERROR: {base} already holds a playground. Use --reset to start over.")
-        shutil.rmtree(base)
+        shutil.rmtree(base, onerror=_force_remove)
     base.mkdir(parents=True, exist_ok=True)
     (base / MARKER).write_text("created by agentic-orchestration-framework/playground\n")
     for name in ("pw-server", "pw-client"):
@@ -77,11 +84,12 @@ def make_repos(base: Path, reset: bool):
                       [{"directory": d, "file": "include/pwd_policy.h",
                         "arguments": ["gcc", "-x", "c", "-c", "include/pwd_policy.h"]}],
                       open(dst / "compile_commands.json", "w"), indent=1)
-        git = ["git", "-C", str(dst)]
-        subprocess.run(git + ["init", "-q"], check=True)
-        subprocess.run(git + ["add", "-A"], check=True)
-        subprocess.run(git + ["-c", "user.name=playground", "-c", "user.email=playground@example.invalid",
-                              "commit", "-qm", "playground sample repo"], check=True)
+        if shutil.which("git"):                 # git is optional: the framework indexes plain folders too
+            git = ["git", "-C", str(dst)]
+            subprocess.run(git + ["init", "-q"], check=True)
+            subprocess.run(git + ["-c", "core.autocrlf=false", "add", "-A"], check=True)
+            subprocess.run(git + ["-c", "user.name=playground", "-c", "user.email=playground@example.invalid",
+                                  "commit", "-qm", "playground sample repo"], check=True)
         print(f"   ✓ {dst}")
 
 

@@ -139,7 +139,8 @@ def _preflight(script: Path) -> None:
     )
     proc = subprocess.run(
         [sys.executable, str(script)],
-        input=init_msg, capture_output=True, text=True, timeout=600, env=os.environ,
+        input=init_msg, capture_output=True, text=True, timeout=600, encoding="utf-8", errors="replace",
+        env={**os.environ, "PYTHONUTF8": "1"},
     )
     if proc.stderr.strip():
         print(f"  {term.YEL}SERVER STDERR:{term._R}\n{proc.stderr.strip()}")

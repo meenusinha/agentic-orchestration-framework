@@ -13,6 +13,7 @@ import json
 import os
 import sqlite3
 import tempfile
+import time
 from contextlib import contextmanager
 from pathlib import Path
 
@@ -46,6 +47,17 @@ def private_dir(path: Path) -> None:
     os.chmod(path, 0o700)
 
 
+def _replace(src, dst, tries: int = 20) -> None:
+    """os.replace, retried briefly: on Windows it fails while another process has dst open."""
+    for i in range(tries):
+        try:
+            return os.replace(src, dst)
+        except PermissionError:
+            if os.name != "nt" or i == tries - 1:
+                raise
+            time.sleep(0.05 * (i + 1))
+
+
 def write_private_text(path, text: str) -> None:
     path = Path(path)
     private_dir(path.parent)
@@ -53,7 +65,7 @@ def write_private_text(path, text: str) -> None:
     try:
         with os.fdopen(fd, "w", encoding="utf-8") as f:
             f.write(text)
-        os.replace(tmp, path)
+        _replace(tmp, path)
     except BaseException:
         if os.path.exists(tmp):
             os.unlink(tmp)

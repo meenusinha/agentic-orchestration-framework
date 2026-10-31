@@ -40,18 +40,26 @@ def venv_python() -> Path:
 
 
 def ensure_in_venv(no_venv: bool):
+    # UTF-8 mode for this process and every child: Windows otherwise reads/writes files and pipes as cp1252
+    os.environ["PYTHONUTF8"] = "1"
     if no_venv:
         os.environ["AO_ALLOW_NO_VENV"] = "1"
-        print(f"WARNING: --no-venv: using {sys.executable}", flush=True)
-        return
-    inside = sys.prefix != sys.base_prefix and Path(sys.prefix).resolve() == (FW / ".venv").resolve()
-    if inside:
-        return
-    py = venv_python()
-    if not py.exists():
-        print(f"Creating the virtual environment {FW / '.venv'} …", flush=True)
-        subprocess.run([sys.executable, "-m", "venv", str(FW / ".venv")], check=True)
-    sys.exit(subprocess.call([str(py), str(Path(__file__).resolve()), *sys.argv[1:]]))
+        if sys.flags.utf8_mode:
+            print(f"WARNING: --no-venv: using {sys.executable}", flush=True)
+            return
+        py = Path(sys.executable)
+    else:
+        inside = sys.prefix != sys.base_prefix and Path(sys.prefix).resolve() == (FW / ".venv").resolve()
+        if inside and sys.flags.utf8_mode:
+            return
+        py = Path(sys.executable) if inside else venv_python()
+        if not py.exists():
+            print(f"Creating the virtual environment {FW / '.venv'} ...", flush=True)
+            subprocess.run([sys.executable, "-m", "venv", str(FW / ".venv")], check=True)
+    try:
+        sys.exit(subprocess.call([str(py), str(Path(__file__).resolve()), *sys.argv[1:]]))
+    except KeyboardInterrupt:
+        sys.exit(0)
 
 
 # ── jobs: one long-running step at a time, log streamed to the page ──────────
@@ -82,6 +90,9 @@ def start_job(name, target) -> str:
         try:
             job.result = target(job)
             job.ok = True if job.ok is None else job.ok
+        except SystemExit as e:                  # scripts imported in-process report errors via sys.exit
+            job.ok = False
+            job.log(f"ERROR: {str(e.code).replace('ERROR: ', '', 1)}" if e.code not in (None, 0) else "ERROR: stopped")
         except Exception as e:
             job.log(f"ERROR: {e}")
             job.ok = False
@@ -94,7 +105,8 @@ def start_job(name, target) -> str:
 def stream(job: Job, cmd, env=None) -> int:
     job.log("$ " + " ".join(str(c) for c in cmd))
     p = subprocess.Popen([str(c) for c in cmd], stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True,
-                         env={**os.environ, **(env or {})}, bufsize=1)
+                         encoding="utf-8", errors="replace", env={**os.environ, "PYTHONUTF8": "1", **(env or {})},
+                         bufsize=1)
     for line in p.stdout:
         if "Redirects are currently not supported" in line or line.startswith("Loading weights"):
             continue
@@ -109,7 +121,8 @@ class QueryWorker:
 
     def _start(self):
         self.proc = subprocess.Popen([sys.executable, str(GUI / "query_worker.py")], stdin=subprocess.PIPE,
-                                     stdout=subprocess.PIPE, stderr=subprocess.DEVNULL, text=True, bufsize=1)
+                                     stdout=subprocess.PIPE, stderr=subprocess.DEVNULL, text=True, bufsize=1,
+                                     encoding="utf-8", errors="replace", env={**os.environ, "PYTHONUTF8": "1"})
         ready = json.loads(self.proc.stdout.readline() or '{"ready": false, "error": "worker exited"}')
         if not ready.get("ready"):
             self.stop()
@@ -292,19 +305,31 @@ def job_playground(body):
     return run
 
 
+DRIVES = "::drives"          # Windows: the list of drives above every drive root
+
+
 def list_dir(path: str) -> dict:
+    if WIN and path == DRIVES:
+        import string
+        drives = [f"{c}:\\" for c in string.ascii_uppercase if os.path.isdir(f"{c}:\\")]
+        return {"path": "This PC", "parent": None, "git": False, "pickable": False,
+                "dirs": [{"name": d, "path": d, "git": False} for d in drives]}
     p = Path(path or Path.home()).expanduser().resolve()
     if not p.is_dir():
         p = Path.home()
     dirs = []
     try:
-        for d in sorted(p.iterdir(), key=lambda x: x.name.lower()):
-            if d.is_dir() and not d.name.startswith("."):
-                dirs.append({"name": d.name, "path": str(d), "git": (d / ".git").exists()})
+        entries = sorted(p.iterdir(), key=lambda x: x.name.lower())
     except OSError:
-        pass
-    return {"path": str(p), "parent": str(p.parent) if p.parent != p else None, "dirs": dirs,
-            "git": (p / ".git").exists()}
+        entries = []
+    for d in entries:
+        try:
+            if d.is_dir() and not d.name.startswith(".") and not d.name.startswith("$"):
+                dirs.append({"name": d.name, "path": str(d), "git": (d / ".git").exists()})
+        except OSError:                  # unreadable entries (Windows junctions, permissions) are skipped
+            continue
+    parent = str(p.parent) if p.parent != p else (DRIVES if WIN else None)
+    return {"path": str(p), "parent": parent, "dirs": dirs, "git": (p / ".git").exists(), "pickable": True}
 
 
 # ── HTTP ──────────────────────────────────────────────────────────────────────
