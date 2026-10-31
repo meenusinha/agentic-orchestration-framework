@@ -78,8 +78,13 @@ def collect_references(files: dict[str, Node]) -> list[dict]:
                 members = {c.name: c for c in n.children if c.kind in (METHOD, FUNCTION_DECL, FUNCTION)}
                 for m in methods_by_owner.get(n.name, []):
                     members[m.name] = m                 # prefer the definition (has the body)
+                # class declared in a header outside any build target → take the process from
+                # the files that define its methods (server.h + server.cpp → authd)
+                target = n.target or next((m.target for m in members.values() if m.target), "")
                 for b in n.attrs["bases"]:
-                    refs.append(_ref("server", b, n, rel, ops={k: v.uid for k, v in members.items()}))
+                    r = _ref("server", b, n, rel, ops={k: v.uid for k, v in members.items()})
+                    r["target"] = target
+                    refs.append(r)
             if n.kind == VARIABLE and n.attrs.get("init") and n.attrs.get("type"):
                 ops = {}
                 for field_name, fn in n.attrs["init"]:

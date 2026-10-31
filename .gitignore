@@ -4,3 +4,6 @@ __pycache__/
 .chroma_db/
 feature_analysis.md
 .rag_index/
+# embedding model files (fetched by setup, never committed)
+models/*/*
+!models/*/.gitkeep

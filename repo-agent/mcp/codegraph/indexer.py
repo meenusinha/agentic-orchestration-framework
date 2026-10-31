@@ -70,8 +70,18 @@ class IndexConfig:
 
     def fingerprint(self, model_sha: str) -> str:
         return hashlib.sha256(json.dumps({
-            "format": INDEX_FORMAT, "model": model_sha, "roots": [str(r) for r in self.roots],
+            "format": INDEX_FORMAT, "code": _code_version(), "model": model_sha,
+            "roots": [str(r) for r in self.roots],
             "file_types": self.file_types, "structure": self.structure}, sort_keys=True).encode()).hexdigest()
+
+
+def _code_version() -> str:
+    """Hash of the code-graph package: a framework upgrade rebuilds every graph
+    (cached embeddings are reused), so no repo keeps links made by older logic."""
+    h = hashlib.sha256()
+    for f in sorted(Path(__file__).parent.glob("*.py")):
+        h.update(f.name.encode() + f.read_bytes())
+    return h.hexdigest()[:16]
 
 
 def collect_files(cfg: IndexConfig):
