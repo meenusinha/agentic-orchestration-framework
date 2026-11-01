@@ -158,6 +158,28 @@ class QueryWorker:
 
 
 WORKER = QueryWorker()
+
+
+# ── knowledge-graph tree view (read-only, standard library) ──────────────────
+class Graph:
+    def __init__(self):
+        self.lock, self.view = threading.Lock(), None
+
+    def call(self, fn, *args):
+        import graphview
+        with self.lock:                          # one sqlite user at a time; requests arrive on many threads
+            if self.view is None:
+                self.view = graphview.GraphView(configured_repos())
+            return getattr(self.view, fn)(*args)
+
+    def reset(self):
+        with self.lock:
+            if self.view is not None:
+                self.view.close()
+            self.view = None
+
+
+GRAPH = Graph()
 RESULTS = FW / "results"
 
 
@@ -263,6 +285,7 @@ def scan(repos: list) -> list:
 def job_configure(body):
     def run(job):
         WORKER.stop()                                   # configuration changes → reload graphs on next query
+        GRAPH.reset()
         cmd = [sys.executable, SCRIPTS / "configure.py", "--framework", FW]
         for r in body["repos"]:
             n = r["name"]
@@ -296,6 +319,7 @@ def job_verify(job):
         raise RuntimeError((result or {}).get("error") or "verification failed")
     job.log("✓ GraphRAG created and linked")
     WORKER.stop()                                       # next query loads the fresh graphs
+    GRAPH.reset()
     return result
 
 
@@ -382,6 +406,23 @@ class Handler(BaseHTTPRequestHandler):
                 return self._send(200, state())
             if u.path == "/api/fs":
                 return self._send(200, list_dir(q.get("path", [""])[0]))
+            if u.path.startswith("/api/graph/"):
+                if not graph_ready():
+                    return self._send(409, {"error": "Create the GraphRAG first (step 6)"})
+                arg = lambda k: q.get(k, [""])[0]
+                what = u.path[len("/api/graph/"):]
+                try:
+                    if what == "overview":
+                        return self._send(200, {"repos": GRAPH.call("overview")})
+                    if what == "children":
+                        return self._send(200, {"children": GRAPH.call("children", arg("repo"), arg("node"))})
+                    if what == "node":
+                        return self._send(200, GRAPH.call("detail", arg("repo"), arg("uid")))
+                    if what == "find":
+                        return self._send(200, {"results": GRAPH.call("find", arg("q")[:200])})
+                except ValueError as e:
+                    return self._send(404, {"error": str(e)})
+                return self._send(404, {"error": "not found"})
             if u.path == "/api/results":
                 return self._send(200, {"results": list_results(), "dir": str(RESULTS)})
             if u.path == "/api/result":

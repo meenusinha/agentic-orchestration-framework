@@ -39,6 +39,12 @@ The page then stays open with a **query field at the top**:
 | Trace interface | an interface or operation name | its IDL definition, the process serving it, and every caller across repos |
 | Impact of change | a function, method or operation | callers, test evidence, affected processes, and clients in other repos |
 
+**Knowledge graph** (next to Queries in the menu) shows each repository as a tree:
+processes and IDL interfaces, then folders (with their role), files, namespaces and
+classes, down to every method, function, field and IDL operation. Click a node to see
+its complete code and its links (calls, implements, called through IDL by, tested by…),
+including links to and from the other repositories. Search results link straight into it.
+
 Every result is also saved as a **new** Markdown file in `results/`
 (e.g. `2026-10-31_142305_search_policy-hint-login.md`); earlier results are never
 overwritten. Running `python3 setup_gui.py` again goes straight to the queries.

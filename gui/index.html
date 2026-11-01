@@ -58,6 +58,20 @@ code,.mono{font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;font
 pre.src{font:12px/1.45 ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;background:var(--code);border:1px solid var(--line);border-radius:8px;padding:10px 12px;overflow:auto;max-height:420px;margin:6px 0}
 .unit{border:1px solid var(--line);border-radius:10px;padding:10px 14px;margin:10px 0}.unit .h{font-weight:600}
 details summary{cursor:pointer;color:var(--muted);font-size:12.5px}.saved{font-size:12.5px;color:var(--muted);margin:4px 0 12px}
+.kg{display:grid;grid-template-columns:minmax(300px,42%) 1fr;gap:16px;align-items:start}@media (max-width:1000px){.kg{grid-template-columns:1fr}}
+.kgtree{border:1px solid var(--line);border-radius:10px;padding:8px 6px;max-height:72vh;overflow:auto;font-size:13px}
+.kgtree ul{list-style:none;margin:0;padding-left:16px}.kgtree>ul{padding-left:0}
+.tn{display:flex;align-items:center;gap:6px;padding:2px 6px;border-radius:6px;cursor:pointer;white-space:nowrap}
+.tn:hover{background:var(--chip)}.tn.sel{background:color-mix(in srgb,var(--accent) 16%,transparent)}
+.tw{width:14px;flex:none;color:var(--muted);text-align:center;font-size:11px}.tname{overflow:hidden;text-overflow:ellipsis}
+.k{font:10.5px/1.6 ui-monospace,Menlo,Consolas,monospace;padding:0 5px;border-radius:4px;background:var(--chip);color:var(--muted);flex:none}
+.k.class,.k.idl_interface{background:color-mix(in srgb,#8b5cf6 20%,transparent);color:#7c3aed}
+.k.method,.k.function,.k.idl_operation,.k.idl_attribute{background:color-mix(in srgb,#10b981 18%,transparent);color:#059669}
+.k.target{background:color-mix(in srgb,#f59e0b 22%,transparent);color:#b45309}.k.folder,.k.group{background:transparent;padding:0}
+.rb{font-size:10.5px;color:var(--muted)}.rb.test{color:#b45309}.rb.external,.rb.generated{color:#9aa4b2}.rb.interface{color:#7c3aed}
+.kgd{border:1px solid var(--line);border-radius:10px;padding:14px 16px;position:sticky;top:70px;max-height:78vh;overflow:auto}
+.kgd h3{margin:0 0 4px;font-size:15px;word-break:break-all}.lk{display:block;padding:2px 0;font-size:12.5px;cursor:pointer;color:var(--accent)}
+.lk .r{color:var(--muted)}#kgFound .lk{font-weight:400}.lk.xr{font-weight:600}.lgroup{margin:8px 0}.lgroup b{font-size:12px;color:var(--muted);text-transform:capitalize}
 .hist{display:flex;justify-content:space-between;gap:10px;padding:6px 0;border-bottom:1px solid var(--line);font-size:13px}
 .hist:last-child{border-bottom:0}nav li.sep{border-top:1px solid var(--line);margin-top:8px;padding-top:14px}
 </style>
@@ -141,6 +155,15 @@ details summary{cursor:pointer;color:var(--muted);font-size:12.5px}.saved{font-s
       <div class="log" id="verifyLog"></div>
       <div id="verifyResult"></div>
     </section>
+    <section data-step="graph">
+      <h2>Knowledge graph</h2>
+      <p class="sub">Browse what the GraphRAG holds: every repository as a tree of folders, files, classes, functions and IDL operations — each a complete unit. Click a node to see its code and its links, including links to and from other repositories.</p>
+      <div class="chips" id="kgStats" style="margin-bottom:10px"></div>
+      <div class="row" style="margin-bottom:10px"><input type="text" id="kgFind" placeholder="Find a function, class, interface or operation…" style="flex:1"><button id="kgFindBtn">Find</button><button id="kgCollapse">Collapse all</button></div>
+      <div id="kgFound"></div>
+      <div class="kg"><div class="kgtree" id="kgTree"></div><div class="kgd" id="kgDetail"><p class="small">Select a node in the tree.</p></div></div>
+    </section>
+
     <section data-step="queries">
       <h2>Queries</h2>
       <p class="sub">Use the query field at the top. Every result is also saved as a new Markdown file in <code id="resDir"></code> — earlier results are never overwritten.</p>
@@ -190,12 +213,13 @@ function nav() {
   $("#steps").innerHTML = STEPS.map(([k,l],i) => {
     const reach = i === 0 || done.has(STEPS[i-1][0]) || done.has(k);
     return `<li class="${k===cur?"active":""} ${done.has(k)?"done":""} ${reach?"reach":""}" data-k="${k}"><span class="dot">${done.has(k)?"✓":i+1}</span>${l}</li>`;
-  }).join("") + `<li class="sep ${cur==="queries"?"active":""} ${S.graph_ready?"reach":""}" data-k="queries"><span class="dot">?</span>Queries</li>`;
+  }).join("") + `<li class="sep ${cur==="queries"?"active":""} ${S.graph_ready?"reach":""}" data-k="queries"><span class="dot">?</span>Queries</li>`
+    + `<li class="${cur==="graph"?"active":""} ${S.graph_ready?"reach":""}" data-k="graph"><span class="dot">⌥</span>Knowledge graph</li>`;
   qbarState();
   document.querySelectorAll("nav li.reach").forEach(li => li.onclick = () => go(li.dataset.k));
   document.querySelectorAll("main section").forEach(s => s.classList.toggle("active", s.dataset.step === cur));
 }
-function go(k) { cur = k; nav(); ({model:showModel, repos:showRepos, review:showReview, configure:showConfigure, queries:showHistory})[k]?.(); window.scrollTo(0,0); }
+function go(k) { cur = k; nav(); ({model:showModel, repos:showRepos, review:showReview, configure:showConfigure, queries:showHistory, graph:showGraph})[k]?.(); window.scrollTo(0,0); }
 function finish(k, next) { done.add(k); go(next); }
 const status = (ok, text) => `<div class="status"><b class="${ok?"ok":"warn"}">${ok?"✓":"●"}</b>${text}</div>`;
 
@@ -366,7 +390,7 @@ $("#verifyBtn").onclick = async () => {
   $("#verifyBtn").disabled = true; $("#verifyResult").innerHTML = "";
   try {
     const res = await runJob(() => api("/api/verify", {}), $("#verifyLog")); done.add("verify");
-    S = await api("/api/state"); fillRepoSelect(); nav();
+    S = await api("/api/state"); fillRepoSelect(); kgLoaded = false; nav();
     const rows = res.repos.map(r => `<tr><td><b>${esc(r.name)}</b></td><td>${r.files}</td><td>${r.units}</td><td>${r.links}</td>
       <td>${r.interfaces_defined.map(esc).join(", ") || "—"}</td><td>${r.unclassified.length ? `<span class="warn">${r.unclassified.map(esc).join(", ")}</span>` : "—"}</td></tr>`).join("");
     const ifs = res.interfaces.map(i => `<div class="iface"><b>${esc(i.interface)}</b> <span class="small">defined in ${esc(i.defined_in)} · ${i.operations.map(esc).join(", ")}</span>
@@ -381,7 +405,8 @@ $("#verifyBtn").onclick = async () => {
       <div class="small">Claude Code — approve the project MCP servers when asked:</div>${cmd(`cd "${first}" && claude`)}
       <div class="small">VS Code — allow the servers, start requests with /cross-repo-feature-analysis:</div>${cmd(`code "${first}"`)}
       <div class="small">Cursor: open the repo and enable the servers in Settings → MCP.</div>
-      <div class="row" style="margin-top:16px"><button class="primary" id="toQueries">Run a query</button><span class="spacer"></span><button id="quit">Close</button></div>`;
+      <div class="row" style="margin-top:16px"><button class="primary" id="toQueries">Run a query</button><button id="toGraph">Browse the knowledge graph</button><span class="spacer"></span><button id="quit">Close</button></div>`;
+    $("#toGraph").onclick = () => go("graph");
     $("#toQueries").onclick = () => { go("queries"); $("#qtext").focus(); };
     document.querySelectorAll("[data-c]").forEach(b => b.onclick = () => { navigator.clipboard?.writeText(b.dataset.c); b.textContent = "Copied"; });
     $("#quit").onclick = async () => { await api("/api/quit", {}); document.body.innerHTML = "<p style='padding:40px'>Setup closed. You can close this tab.</p>"; };
@@ -409,6 +434,7 @@ $("#qbar").onsubmit = async (ev) => {
   try {
     const r = await api("/api/query", {mode:$("#qmode").value, text, repo:$("#qrepo").value});
     $("#qresult").innerHTML = `<div class="saved">Saved to <code>${esc(r.saved)}</code> · ${r.seconds}s</div>` + render(r.mode, r.result);
+    document.querySelectorAll("[data-graph]").forEach(b => b.onclick = () => { const [rp, id] = b.dataset.graph.split("|"); go("graph"); reveal(rp, id); });
     showHistory();
   } catch (e) { $("#qresult").innerHTML = `<p class="bad">${esc(e.message)}</p>`; }
   $("#qrun").disabled = false;
@@ -417,7 +443,7 @@ const pre = (t) => `<pre class="src">${esc(t)}</pre>`;
 function unitHtml(n, parent, rel) {
   const r = Object.entries(rel||{}).filter(([k]) => ["calls_operation","implements","tested_by","called_by","calls"].includes(k))
     .map(([k,v]) => `<div class="small"><b>${esc(k.replace(/_/g," "))}:</b> ${v.slice(0,8).map(x => esc(x.name||x.qualname)).join(", ")}</div>`).join("");
-  return `<div class="unit"><div class="h">${esc(n.kind)} <code>${esc(n.qualname)}</code></div>
+  return `<div class="unit"><div class="h">${esc(n.kind)} <code>${esc(n.qualname)}</code> ${n.id && n.repo ? `<button class="link small" data-graph="${esc(n.repo)}|${esc(n.id)}">show in graph</button>` : ""}</div>
     <div class="small">${esc(n.file)}:${n.lines[0]}–${n.lines[1]}${n.process ? " · process <b>"+esc(n.process)+"</b>" : ""} · ${esc(n.role)}${n.ifdef ? " · #if "+esc(n.ifdef) : ""}</div>
     ${parent && parent.skeleton && parent.skeleton !== "(shown above)" ? `<details><summary>in ${esc(parent.kind||"")} ${esc(parent.qualname)}</summary>${pre(parent.skeleton)}</details>` : ""}
     ${pre(n.text)}${r}</div>`;
@@ -460,6 +486,94 @@ async function showHistory() {
     });
   } catch (e) { $("#history").textContent = e.message; }
 }
+
+/* knowledge graph — read-only tree */
+let kgLoaded = false, kgSel = null;
+const KIND = {folder:"📁", group:"▤", file:"", target:"proc", idl_interface:"IDL", idl_operation:"op", idl_attribute:"attr",
+  idl_type:"type", class:"class", namespace:"ns", module:"mod", method:"m", function:"fn", function_decl:"decl",
+  field:"field", variable:"var", macro:"#def", type:"type", doc:"doc", doc_section:"§", text:"txt"};
+function kgNodeHtml(repo, c) {
+  const role = c.role && !["implementation"].includes(c.role) ? `<span class="rb ${esc(c.role)}">${esc(c.role)}${c.mixed ? "+" : ""}</span>` : "";
+  const proc = c.target && c.kind !== "target" ? `<span class="rb">${esc(c.target)}</span>` : "";
+  const cnt = c.kind === "folder" || c.kind === "group" ? `<span class="rb">${c.count}</span>` : "";
+  return `<li data-repo="${esc(repo)}" data-id="${esc(c.id)}" data-open="0"><div class="tn" data-has="${c.has_children ? 1 : 0}" data-sel="${["folder","group"].includes(c.kind) || c.id.startsWith("file:") ? 0 : 1}">
+    <span class="tw">${c.has_children ? "▸" : ""}</span><span class="k ${esc(c.kind)}">${esc(KIND[c.kind] ?? c.kind)}</span>
+    <span class="tname">${esc(c.name)}</span>${role}${proc}${cnt}${c.lines ? `<span class="rb">${esc(c.lines)}</span>` : ""}</div></li>`;
+}
+async function kgExpand(li, open = true) {
+  const tn = li.querySelector(":scope > .tn"); if (tn.dataset.has !== "1") return;
+  let ul = li.querySelector(":scope > ul");
+  if (!open) { if (ul) ul.style.display = "none"; li.dataset.open = "0"; tn.querySelector(".tw").textContent = "▸"; return; }
+  if (!ul) {
+    const node = li.dataset.id.startsWith("repo:") ? "" : li.dataset.id;          // a repo's root
+    const r = await api(`/api/graph/children?repo=${encodeURIComponent(li.dataset.repo)}&node=${encodeURIComponent(node)}`);
+    ul = document.createElement("ul"); ul.innerHTML = r.children.map(c => kgNodeHtml(li.dataset.repo, c)).join(""); li.appendChild(ul);
+  }
+  ul.style.display = ""; li.dataset.open = "1"; tn.querySelector(".tw").textContent = "▾";
+}
+$("#kgTree").onclick = async (ev) => {
+  const tn = ev.target.closest(".tn"); if (!tn) return; const li = tn.parentElement;
+  if (ev.target.classList.contains("tw") || tn.dataset.sel === "0") { await kgExpand(li, li.dataset.open !== "1"); if (tn.dataset.sel === "0") return; }
+  kgSelect(li);
+};
+async function kgSelect(li) {
+  document.querySelectorAll(".tn.sel").forEach(x => x.classList.remove("sel")); li.querySelector(":scope > .tn").classList.add("sel"); kgSel = li;
+  if (li.dataset.id.startsWith("repo:")) return kgRepoDetail(li.dataset.repo);
+  try { kgShow(await api(`/api/graph/node?repo=${encodeURIComponent(li.dataset.repo)}&uid=${encodeURIComponent(li.dataset.id)}`)); }
+  catch (e) { $("#kgDetail").innerHTML = `<p class="bad">${esc(e.message)}</p>`; }
+}
+function kgRepoDetail(repo) {
+  const o = (kgOverview || []).find(x => x.repo === repo) || {};
+  $("#kgDetail").innerHTML = `<h3>${esc(repo)}</h3><div class="small">${esc(o.path || "")}</div>
+    <div class="chips" style="margin:8px 0">${Object.entries(o.kinds || {}).sort((a,b) => b[1]-a[1]).map(([k,v]) => `<span class="chip">${esc(k)} ${v}</span>`).join("")}</div>
+    <div class="small">${o.files} files · ${o.nodes} nodes · ${o.links} links · ${o.cross_repo} to other repositories</div>`;
+}
+const linkHtml = (x, home) => `<span class="lk ${x.repo !== home ? "xr" : ""}" data-r="${esc(x.repo)}" data-u="${esc(x.uid)}" title="${esc(x.file || "")}">${esc(x.kind === "target" ? x.name : (x.qualname || x.name || x.uid))} <span class="r">${x.repo !== home ? "· " + esc(x.repo) : ""}${x.kind ? " · " + esc(x.kind) : ""}${x.confidence > 0 && x.confidence < 0.9 ? " · confidence " + x.confidence : ""}</span></span>`;
+function kgShow(n) {
+  const groups = (obj, arrow) => Object.entries(obj).map(([k, v]) => `<div class="lgroup"><b>${arrow} ${esc(k)}</b> <span class="rb">${v.length}</span>${v.slice(0, 60).map(x => linkHtml(x, n.repo)).join("")}</div>`).join("");
+  const links = groups(n.links_out, "→") + groups(n.links_in, "←");
+  $("#kgDetail").innerHTML = `<span class="k ${esc(n.kind)}">${esc(n.kind)}</span><h3 style="margin-top:6px">${esc(n.kind === "target" ? n.name : (n.qualname || n.name))}</h3>
+    <div class="small">${esc(n.repo)} · ${esc(n.file || "")}${n.start_line ? ":" + n.start_line + "–" + n.end_line : ""}${n.role ? " · " + esc(n.role) : ""}${n.target ? " · process <b>" + esc(n.target) + "</b>" : ""}${n.lang ? " · " + esc(n.lang) : ""}</div>
+    ${n.signature && n.signature !== n.text ? `<div class="small" style="margin-top:6px"><code>${esc(n.signature)}</code></div>` : ""}
+    ${n.doc ? `<div class="small" style="margin-top:6px">${esc(n.doc)}</div>` : ""}
+    ${links ? `<div style="margin-top:10px">${links}</div>` : `<p class="small">No links.</p>`}
+    ${n.text ? `<details ${n.is_container ? "" : "open"} style="margin-top:8px"><summary>${n.is_container ? "Outline" : "Complete code"} (${n.text.split("\n").length} lines)</summary><pre class="src">${esc(n.text)}</pre></details>` : ""}`;
+  document.querySelectorAll("#kgDetail .lk").forEach(a => a.onclick = () => reveal(a.dataset.r, a.dataset.u));
+}
+async function reveal(repo, uid) {
+  try {
+    const n = await api(`/api/graph/node?repo=${encodeURIComponent(repo)}&uid=${encodeURIComponent(uid)}`);
+    if (!kgLoaded) await showGraph();
+    let li = document.querySelector(`#kgTree > ul > li[data-repo="${CSS.escape(repo)}"]`); if (!li) return kgShow(n);
+    await kgExpand(li);
+    for (const id of n.path) {
+      const next = li.querySelector(`:scope > ul > li[data-id="${CSS.escape(id)}"]`); if (!next) break;
+      li = next; await kgExpand(li);
+    }
+    const target = li.querySelector(`:scope > ul > li[data-id="${CSS.escape(n.uid)}"]`) || li;
+    document.querySelectorAll(".tn.sel").forEach(x => x.classList.remove("sel"));
+    target.querySelector(":scope > .tn").classList.add("sel"); target.scrollIntoView({block: "center"}); kgShow(n);
+  } catch (e) { $("#kgDetail").innerHTML = `<p class="bad">${esc(e.message)}</p>`; }
+}
+let kgOverview = null;
+async function showGraph() {
+  if (kgLoaded) return;
+  try {
+    kgOverview = (await api("/api/graph/overview")).repos;
+    $("#kgStats").innerHTML = kgOverview.map(o => o.ok ? `<span class="chip"><b>${esc(o.repo)}</b> ${o.files} files · ${o.nodes} nodes · ${o.links} links · ${o.cross_repo} cross-repo</span>` : `<span class="chip warn">${esc(o.repo)}: ${esc(o.error)}</span>`).join("");
+    $("#kgTree").innerHTML = "<ul>" + kgOverview.filter(o => o.ok).map(o => `<li data-repo="${esc(o.repo)}" data-id="repo:${esc(o.repo)}" data-open="0"><div class="tn" data-has="1" data-sel="1"><span class="tw">▸</span><span class="k repok">repo</span><span class="tname"><b>${esc(o.repo)}</b></span></div></li>`).join("") + "</ul>";
+    kgLoaded = true;
+    for (const li of document.querySelectorAll("#kgTree > ul > li")) await kgExpand(li);
+  } catch (e) { $("#kgTree").innerHTML = `<p class="bad" style="padding:8px">${esc(e.message)}</p>`; }
+}
+$("#kgCollapse").onclick = () => document.querySelectorAll("#kgTree li[data-open='1']").forEach(li => { if (!li.dataset.id.startsWith("repo:")) kgExpand(li, false); });
+async function kgFind() {
+  const q = $("#kgFind").value.trim(); if (!q) { $("#kgFound").innerHTML = ""; return; }
+  const r = (await api("/api/graph/find?q=" + encodeURIComponent(q))).results;
+  $("#kgFound").innerHTML = r.length ? `<div class="card" style="margin:0 0 12px;max-height:220px;overflow:auto">${r.map(x => linkHtml(x, "")).join("")}</div>` : `<p class="small">Nothing named like “${esc(q)}”.</p>`;
+  document.querySelectorAll("#kgFound .lk").forEach(a => a.onclick = () => reveal(a.dataset.r, a.dataset.u));
+}
+$("#kgFindBtn").onclick = kgFind; $("#kgFind").onkeydown = (e) => { if (e.key === "Enter") kgFind(); };
 
 /* folder picker */
 let pickCb = null, pickPath = "";

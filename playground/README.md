@@ -40,6 +40,11 @@ python3 setup_gui.py          # in the framework clone
 
 Each result is saved as a new file in `<framework>/results/`.
 
+6. Open **Knowledge graph** in the menu to browse the graph as a tree. For example,
+   expand `pw-server › idl/ › auth.idl › Auth › IPasswordService` and click `checkStrength`.
+   The panel shows the servant that implements it, and the three pw-client functions that
+   call it, each one click away.
+
 ## From the command line
 
 Needs Python 3.11+ and git.

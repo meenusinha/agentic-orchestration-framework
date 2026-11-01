@@ -246,7 +246,35 @@ def main():
         txt = Path(r["saved"]).read_text(encoding="utf-8")
         check("reports are UTF-8 with the full code", "#define PWD_MIN_LEN" in txt and "·" in txt)
 
-        print("\n11. Restart: the GUI opens on the queries", flush=True)
+        print("\n11. Knowledge graph (tree view)", flush=True)
+        q = urllib.request.quote
+        code, ov = g.call("/api/graph/overview")
+        check("graph overview for both repos", code == 200 and {o["repo"] for o in ov["repos"] if o["ok"]} ==
+              {"pw-server", "pw-client"}, "; ".join(f"{o['repo']}: {o.get('nodes')} nodes" for o in ov.get("repos", [])))
+        code, root = g.call("/api/graph/children?repo=pw-server&node=")
+        names = [c["name"] for c in root.get("children", [])]
+        check("tree root: processes, IDL interfaces, folders", code == 200 and "Processes & libraries" in names and
+              "idl/" in names and "src/" in names, ", ".join(names[:8]))
+        src = g.call("/api/graph/children?repo=pw-server&node=" + q("dir:src"))[1]["children"]
+        srv = next((c for c in src if c["name"] == "server.cpp"), {})
+        ns = g.call("/api/graph/children?repo=pw-server&node=" + srv.get("id", "x"))[1].get("children", [])
+        methods = g.call("/api/graph/children?repo=pw-server&node=" + ns[0]["id"])[1]["children"] if ns else []
+        cs = next((m for m in methods if m["name"] == "checkStrength"), None)
+        check("folder → file → namespace → method", cs is not None, " / ".join(["src", "server.cpp"] +
+              [n["name"] for n in ns[:1]] + ([cs["name"]] if cs else [])))
+        code, d = g.call("/api/graph/node?repo=pw-server&uid=" + (cs or {}).get("id", "x"))
+        check("node detail has the complete code and its links", code == 200 and "pwd_policy_check" in d.get("text", "")
+              and "implements" in d.get("links_out", {}), ", ".join(d.get("links_out", {})))
+        code, f = g.call("/api/graph/find?q=checkStrength")
+        op = next((r for r in f.get("results", []) if r["kind"] == "idl_operation"), None)
+        code, od = g.call(f"/api/graph/node?repo={op['repo']}&uid={op['uid']}") if op else (0, {})
+        xr = {x["repo"] for v in od.get("links_in", {}).values() for x in v}
+        check("IDL operation shows its callers in the other repo", "pw-client" in xr, ", ".join(od.get("links_in", {})))
+        check("graph API refuses bad ids and unknown repos",
+              g.call("/api/graph/children?repo=pw-server&node=" + q("x' OR 1=1 --"))[0] == 404 and
+              g.call("/api/graph/children?repo=nope&node=")[0] == 404)
+
+        print("\n12. Restart: the GUI opens on the queries", flush=True)
         g.call("/api/quit", {})
         proc.wait(timeout=30)
         proc, url = start_gui(env)
