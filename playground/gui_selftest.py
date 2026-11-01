@@ -204,10 +204,16 @@ def main():
                                 for u in s["unknown_types"]}} for s in scans]
         ok, lines, _ = g.job("/api/configure", {"repos": plan})
         check("configured", ok, lines[-1] if lines else "")
-        mcp = Path(res["repos"][1]) / ".mcp.json"
+        mcp = Path(res["repos"][1]) / ".vscode" / "mcp.json"
         cfg = json.loads(mcp.read_text(encoding="utf-8")) if mcp.exists() else {}
-        srv = next(iter(cfg.get("mcpServers", {}).values()), {})
-        check("MCP config uses the venv Python and UTF-8 mode",
+        srv = next(iter(cfg.get("servers", {}).values()), {})
+        repo1 = Path(res["repos"][1])
+        check("VS Code + Copilot files only (no Claude Code / Cursor config)",
+              (repo1 / ".github" / "copilot-instructions.md").exists() and
+              (repo1 / ".github" / "skills" / "cross-repo-feature-analysis" / "SKILL.md").exists() and
+              not (repo1 / ".mcp.json").exists() and not (repo1 / ".cursor").exists() and
+              not (repo1 / ".claude").exists())
+        check("VS Code MCP config uses the venv Python and UTF-8 mode",
               Path(srv.get("command", "")).resolve() == venv_py.resolve() and srv.get("env", {}).get("PYTHONUTF8") == "1",
               srv.get("command", ""))
         code, q = g.call("/api/query", {"mode": "search", "text": "x"})

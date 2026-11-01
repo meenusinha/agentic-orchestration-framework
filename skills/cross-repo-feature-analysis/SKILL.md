@@ -22,17 +22,17 @@ to the repos and processes that define, serve and call each interface.
 | `<repo>` | `get_node(id)` / `get_children(id)` / `find_references(symbol)` | Navigate the graph |
 | `<repo>` | `query_repo(feature_request)` | The same knowledge as framed text (older clients) |
 
-Tool names are shown differently by each client (for example
-`mcp__authd__trace_interface` in Claude Code). Match on server and tool name.
+In Copilot Chat (Agent mode) the tools appear under each MCP server's name, e.g.
+`trace_interface` from server `authd`. Match on server and tool name.
 
 ## Before you start
 
 1. **Check the tools are available.** Look for `get_relevant_repos` from a server
    called `orchestrator_router`. If it is missing, do not answer from memory:
-   - If the workspace has a `.mcp.json` (or `.cursor/mcp.json`) listing
-     `orchestrator_router`, setup is done but the servers aren't loaded. Ask the
-     developer to restart the agent and approve the project MCP servers (`/mcp` in
-     Claude Code shows their status; VS Code: reload the window).
+   - If the workspace has a `.vscode/mcp.json` listing `orchestrator_router`, setup is
+     done but the servers aren't running. Ask the developer to reload the VS Code window
+     and allow the MCP servers (the **MCP: List Servers** command shows their status), and
+     to keep Copilot Chat in **Agent** mode — only Agent mode can call MCP tools.
    - Otherwise offer the first-time setup in [references/setup.md](references/setup.md).
 2. **Find out which repo you are in.** Read `mcp/config.yaml` at the workspace root;
    `repo_name` is this repo's id and its MCP server's name.

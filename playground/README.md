@@ -66,11 +66,14 @@ Options:
 - `--no-venv` opts out of the virtual environment deliberately and installs into the
   Python you ran it with.
 
-## Try it in an AI assistant (optional)
+## Try it in VS Code with GitHub Copilot (optional)
 
 ```bash
-cd <your clone>/pw-client && claude      # approve the project MCP servers
+code <your clone>/pw-client
 ```
+
+Allow the MCP servers when VS Code asks, switch Copilot Chat to **Agent** mode, and start
+each request with `/cross-repo-feature-analysis`:
 
 - *What would it take to show the policy hint in the login dialog's strength meter?*
 - *Which processes are affected if `PWD_MIN_LEN` changes?*
@@ -78,7 +81,7 @@ cd <your clone>/pw-client && claude      # approve the project MCP servers
 - *Add a new IDL operation `isCompromised(pw)` — what has to change, where, in what order?*
 - *Where are database credentials configured?* (watch for `[REDACTED]`)
 
-In VS Code, allow the MCP servers and start requests with `/cross-repo-feature-analysis`.
+
 
 ## Things to edit and watch
 

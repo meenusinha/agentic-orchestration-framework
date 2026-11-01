@@ -142,7 +142,7 @@ details summary{cursor:pointer;color:var(--muted);font-size:12.5px}.saved{font-s
 
     <section data-step="configure">
       <h2>5. Configure</h2>
-      <p class="sub">Writes each repository's settings, connects the repos to each other and generates the MCP configuration for Claude Code, Cursor and VS Code.</p>
+      <p class="sub">Writes each repository's settings, connects the repos to each other and generates the VS Code + GitHub Copilot configuration (MCP servers, Copilot instructions and the agent skill).</p>
       <div id="configSummary"></div>
       <div class="row"><button class="primary" id="configureBtn">Configure</button></div>
       <div class="log" id="configLog"></div>
@@ -402,9 +402,7 @@ $("#verifyBtn").onclick = async () => {
       <table><tr><th>Repository</th><th>Files</th><th>Units</th><th>Links</th><th>IDL interfaces defined</th><th>Not indexed</th></tr>${rows}</table>
       <h3 style="font-size:15px;margin-top:18px">Interfaces between processes</h3>${ifs || "<p class='small'>No IDL interfaces found.</p>"}
       <h3 style="font-size:15px;margin-top:18px">Start using it</h3>
-      <div class="small">Claude Code — approve the project MCP servers when asked:</div>${cmd(`cd "${first}" && claude`)}
-      <div class="small">VS Code — allow the servers, start requests with /cross-repo-feature-analysis:</div>${cmd(`code "${first}"`)}
-      <div class="small">Cursor: open the repo and enable the servers in Settings → MCP.</div>
+      <div class="small">Open a repo in VS Code, allow the MCP servers when asked, switch Copilot Chat to <b>Agent</b> mode and start requests with <code>/cross-repo-feature-analysis</code>:</div>${cmd(`code "${first}"`)}
       <div class="row" style="margin-top:16px"><button class="primary" id="toQueries">Run a query</button><button id="toGraph">Browse the knowledge graph</button><span class="spacer"></span><button id="quit">Close</button></div>`;
     $("#toGraph").onclick = () => go("graph");
     $("#toQueries").onclick = () => { go("queries"); $("#qtext").focus(); };

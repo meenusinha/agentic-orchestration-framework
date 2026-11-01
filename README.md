@@ -51,7 +51,7 @@ overwritten. Running `python3 setup_gui.py` again goes straight to the queries.
 
 No AI agent or LLM is used for any of this: parsing, linking, embedding (local model)
 and search all run on your machine. The page listens on 127.0.0.1 only and requires a
-per-session token. An AI assistant (Claude Code, Copilot, Cursor) is optional, for
+per-session token. GitHub Copilot in VS Code is optional, for
 turning the results into a design document through the MCP servers.
 
 Prefer the command line? `test_mcp.py "your question"` writes a new report in
@@ -502,42 +502,35 @@ You'll see every MCP call, RAG query, and routing decision in real time:
 
 ---
 
-## Way C — Claude Code, Cursor and other agents (Agent Skill)
+## Way C — GitHub Copilot agent mode (Agent Skill)
 
-The flow is also packaged as a portable [Agent Skill](https://agentskills.io):
+The flow is also packaged as an [Agent Skill](https://agentskills.io):
 [`skills/cross-repo-feature-analysis/`](skills/cross-repo-feature-analysis/SKILL.md).
-It tells the agent when to use the MCP servers and how: route first, query its own
-repo, query the selected peers, then write the Feature Analysis Document.
+It tells Copilot when to use the MCP servers and how: route first, query its own repo,
+query the selected peers, then write the Feature Analysis Document.
 
-**Guided setup:** install only the skill and ask your agent something like *"set up
-cross-repo analysis for ../frontend and ../backend"*. The agent clones the framework,
-uses `scripts/scan.py` to propose which docs and code each repo should index, and agrees
-that plan with you. It asks whether you already have the embedding model, and copies
-your copy or downloads one only with your permission. Then it runs
-`scripts/configure.py`, which does steps 2–5 in one go.
-It can also draft starter `knowledge/` docs for repos that don't have any.
+`orchestrator/setup.py` (run by the setup GUI and by `configure.py`) writes these into
+every connected repo:
 
-**Manual setup:** after steps 1–4, run `python orchestrator/setup.py` from the
-activated venv. Besides the VS Code files, it writes these into every repo:
-
-| Client | Generated |
+| File | Purpose |
 |---|---|
-| Claude Code | `.mcp.json` + `.claude/skills/cross-repo-feature-analysis/` |
-| Cursor | `.cursor/mcp.json` |
+| `.vscode/mcp.json` | the MCP servers: the router plus one code-graph server per repo; pins the venv's Python |
+| `.github/copilot-instructions.md` | repo-specific instructions for Copilot |
+| `.github/skills/cross-repo-feature-analysis/` | the Agent Skill, where VS Code + Copilot finds it |
 
-These configs pin the venv's Python interpreter, so the client doesn't have to be
-launched from the venv. Then:
+Then open the repo in VS Code, allow the MCP servers, switch Copilot Chat to **Agent**
+mode and start your request with **`/cross-repo-feature-analysis`**, e.g.
+*"/cross-repo-feature-analysis What would it take to add real-time password-strength
+feedback to login?"*. In testing, a small auto-selected model (`mai-code-1.1-flash`)
+answered from local files alone, skipping the MCP tools, unless the skill was invoked by
+name. A stronger model may trigger it without the prefix.
 
-- **Claude Code**: run `claude` in any repo, approve the project MCP servers, and ask
-  for a feature, e.g. *"What would it take to add real-time password-strength feedback
-  to login?"*
-- **VS Code + Copilot**: the skill is installed in `.claude/skills/`, where Copilot finds
-  it. Start your request with **`/cross-repo-feature-analysis`**. In testing, a small
-  auto-selected model (`mai-code-1.1-flash`) answered from local files alone, skipping
-  the MCP tools, unless the skill was invoked by name. A stronger model may trigger it
-  without the prefix.
-- **Cursor / other agents**: enable the MCP servers, then install the skill folder
-  wherever your agent loads skills from.
+**Guided setup:** with only the skill installed, ask Copilot (Agent mode) something like
+*"/cross-repo-feature-analysis set up cross-repo analysis for ../frontend and
+../backend"*. It clones the framework, uses `scripts/scan.py` to propose what each repo
+should index, agrees that plan with you, asks about the embedding model, then runs
+`scripts/configure.py`. It can also draft starter `knowledge/` docs. The setup GUI does
+the same without an agent.
 
 ---
 
@@ -578,7 +571,7 @@ agentic-orchestration-framework/        ← this repo (cloned once)
 │   │   ├── router.py                    ← generic routing logic (do not edit)
 │   │   ├── router_mcp_server.py         ← MCP server (do not edit)
 │   │   └── demo_logger.py               ← logging (do not edit)
-│   └── setup.py                         ← ★ WAY B/C: generates VS Code, Claude Code, Cursor config
+│   └── setup.py                         ← ★ WAY B/C: generates the VS Code + Copilot config
 │
 ├── skills/
 │   └── cross-repo-feature-analysis/     ← Agent Skill (installed into repos by setup.py)

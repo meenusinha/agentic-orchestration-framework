@@ -20,12 +20,12 @@ Steps (each prints what it does):
   3. check the embedding model (copy with --model-from, or --download-model)
   4. scan both repos and configure them        (skipped with --guided)
   5. smoke-test through real MCP servers         (skipped with --guided)
-  6. print what to try in Claude Code / VS Code / the CLI
+  6. print what to try in VS Code + Copilot and on the command line
 
 Usage (from the framework clone, with Python 3.11+):
   python3 playground/setup_playground.py --download-model
   python3 playground/setup_playground.py --model-from /path/to/granite-embedding-small-english-r2
-  python3 playground/setup_playground.py --guided        # let the agent do steps 4–5 with you
+  python3 playground/setup_playground.py --guided        # let Copilot (agent mode) do steps 4–5 with you
   python3 playground/setup_playground.py --dir ~/work --branch main ...   # where to clone, which branch
   The setup GUI (python3 setup_gui.py) does the same with clicks: step 3 → Clone from Git.
   python3 playground/setup_playground.py --no-venv ...   # opt out of the venv (installs into this Python)
@@ -140,17 +140,17 @@ def main():
     py = ensure_deps()
 
     if args.guided:
-        dst = client / ".claude" / "skills" / SKILL.name
+        dst = client / ".github" / "skills" / SKILL.name
         shutil.copytree(SKILL, dst, dirs_exist_ok=True)
-        print(f"   ✓ skill installed for the agent: {dst}")
+        print(f"   ✓ agent skill installed for Copilot: {dst}")
         print(f"""
-━━ Guided mode: let the agent set things up with you
-   cd {client}
-   claude
-   Then ask:  "Set up cross-repo analysis between this repo and ../pw-server.
-               The framework is already cloned at {FW} with its venv at {FW / '.venv'}."
-   The agent will scan both repos, ask you about the unknown file types (.xcfg, .xidl),
-   ask about the embedding model, and configure everything. Restart claude afterwards.""")
+━━ Guided mode: let GitHub Copilot set things up with you
+   code {client}
+   In Copilot Chat, switch to Agent mode and ask:
+     /cross-repo-feature-analysis Set up cross-repo analysis between this repo and ../pw-server.
+     The framework is already cloned at {FW} with its venv at {FW / '.venv'}.
+   Copilot will scan both repos, ask you about the unknown file types (.xcfg, .xidl),
+   ask about the embedding model, and configure everything. Reload the window afterwards.""")
         return
 
     step(3, "Embedding model")
@@ -171,15 +171,16 @@ def main():
         sys.exit("configure.py failed — see the messages above")
 
     step(5, "Smoke test through real MCP servers (first run builds both code graphs)")
-    r = run([py, FW / "playground" / "smoke_test.py", client / ".mcp.json"])
+    r = run([py, FW / "playground" / "smoke_test.py", client / ".vscode" / "mcp.json"])
     if r.returncode != 0:
         sys.exit("smoke test failed — see above")
 
     logs = Path.home() / ".agentic-orchestration" / "logs" / "mcp-orchestration.log"
     print(f"""
 ━━ 6. Try it
-   Claude Code:   cd {client} && claude          (approve the project MCP servers; /mcp shows them)
-   VS Code:       code {client}                  (allow the servers; start requests with /cross-repo-feature-analysis)
+   VS Code:       code {client}
+                  allow the MCP servers, switch Copilot Chat to Agent mode and start
+                  requests with /cross-repo-feature-analysis
    CLI (Way A):   {py} {FW / 'test_mcp.py'} "add a password strength hint to the login dialog"
    Live log:      tail -f {logs}
 

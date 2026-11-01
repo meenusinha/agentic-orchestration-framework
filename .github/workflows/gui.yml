@@ -50,4 +50,4 @@ jobs:
         shell: bash
         run: |
           if [ -x .venv/Scripts/python.exe ]; then PY=.venv/Scripts/python.exe; else PY=.venv/bin/python; fi
-          "$PY" playground/smoke_test.py "${{ runner.temp }}/pg/pw-client/.mcp.json"
+          "$PY" playground/smoke_test.py "${{ runner.temp }}/pg/pw-client/.vscode/mcp.json"

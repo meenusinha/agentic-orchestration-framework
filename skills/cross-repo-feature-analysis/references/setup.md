@@ -23,7 +23,7 @@ two. Make it easy for them:
 
 Check for an existing install, in this order:
 
-1. The `orchestrator_router` entry in any `.mcp.json`. Its `args` path is
+1. The `orchestrator_router` entry in any `.vscode/mcp.json`. Its `args` path is
    `<framework>/orchestrator/mcp/router_mcp_server.py`.
 2. `~/agentic-orchestration`.
 3. Ask the developer whether they have a clone somewhere else.
@@ -141,8 +141,8 @@ The script:
 - copies the repo agent (`mcp/`, including its `codegraph/` package) and `knowledge/`
   into each repo, and writes `repo_name`, the paths, `file_types` and `structure` into
   that repo's `mcp/config.yaml`
-- runs `orchestrator/setup.py`, which writes `.mcp.json`, `.cursor/mcp.json`,
-  `.vscode/mcp.json`, the Copilot instructions and this skill into every repo, tells
+- runs `orchestrator/setup.py`, which writes `.vscode/mcp.json`,
+  `.github/copilot-instructions.md` and this skill (`.github/skills/`) into every repo, tells
   every server which repos are connected (so IDL interfaces can be followed across
   them), and adds `.rag_index/` to each git repo's `.gitignore`
 
@@ -178,16 +178,13 @@ redacts secret-looking values, but it's better if they're never there).
 
 ## 7. Load the servers
 
-The agent only loads MCP servers when it starts. Tell the developer to:
-
-- **Claude Code**: restart it in the repo and approve the project MCP servers when
-  asked. `/mcp` shows their status.
-- **Cursor**: enable the servers in Settings → MCP.
-- **VS Code + Copilot**: reload the window and allow the servers. VS Code stops changed
-  servers after a re-configure without restarting them, so reload after every
-  `configure.py` run. Tell the developer to start requests with
-  `/cross-repo-feature-analysis`, because small auto-selected models may otherwise
-  skip the MCP tools.
+VS Code starts the MCP servers listed in `.vscode/mcp.json` when the workspace opens.
+Tell the developer to reload the VS Code window and allow the servers when asked
+(**MCP: List Servers** shows their status). VS Code stops changed servers after a
+re-configure without restarting them, so reload after every `configure.py` run. Tell the
+developer to keep Copilot Chat in **Agent** mode and to start requests with
+`/cross-repo-feature-analysis`, because small auto-selected models may otherwise skip the
+MCP tools.
 
 Start the servers of repos that define IDL interfaces first if you can: each repo
 publishes its interfaces when its graph is built, and the others link to them (links

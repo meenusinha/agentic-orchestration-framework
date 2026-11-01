@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """Smoke test for the playground: start the repo MCP servers exactly as the generated
-config says and check the cross-repo results. Usage: smoke_test.py <pw-client>/.mcp.json"""
+VS Code config says and check the cross-repo results. Usage: smoke_test.py <pw-client>/.vscode/mcp.json"""
 import asyncio
 import json
 import sys
@@ -14,7 +14,7 @@ for _s in (sys.stdout, sys.stderr):      # Windows consoles/pipes default to cp1
     if hasattr(_s, "reconfigure"):
         _s.reconfigure(encoding="utf-8", errors="replace")
 
-CFG = json.loads(Path(sys.argv[1]).read_text())["mcpServers"]
+CFG = json.loads(Path(sys.argv[1]).read_text())["servers"]          # VS Code's mcp.json format
 
 
 TIMEOUT = 300      # seconds per call — a hang reports which server and tool instead of waiting forever

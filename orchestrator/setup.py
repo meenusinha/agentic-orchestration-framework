@@ -7,8 +7,8 @@ What it does:
   1. Reads mcp/config.yaml
   2. For every listed repo: generates .vscode/mcp.json (absolute paths, no env vars)
   3. For every listed repo: generates .github/copilot-instructions.md (repo-specific)
-  4. For every listed repo: generates .mcp.json (Claude Code) and .cursor/mcp.json (Cursor)
-     and installs the cross-repo-feature-analysis skill into .claude/skills/
+  4. For every listed repo: installs the cross-repo-feature-analysis agent skill into
+     .github/skills/ (VS Code + GitHub Copilot)
   5. Generates .vscode/mcp.json for the orchestrator itself
   6. Prints a summary
 
@@ -164,14 +164,6 @@ def _write_mcp_json(target_dir: Path) -> Path:
     return out
 
 
-def _write_mcp_servers_json(out: Path) -> Path:
-    """Write the {"mcpServers": ...} format used by Claude Code and Cursor."""
-    out.parent.mkdir(exist_ok=True)
-    with open(out, "w") as f:
-        json.dump({"mcpServers": _all_servers()}, f, indent=2)
-    return out
-
-
 def _gitignore_index(repo_path: Path) -> bool:
     """Keep the private search index out of git. Returns True if .gitignore changed."""
     if not (repo_path / ".git").exists():
@@ -188,7 +180,7 @@ def _gitignore_index(repo_path: Path) -> bool:
 
 
 def _install_skill(target_dir: Path) -> Path:
-    out = target_dir / ".claude" / "skills" / SKILL_NAME
+    out = target_dir / ".github" / "skills" / SKILL_NAME        # where VS Code + Copilot finds agent skills
     if out.exists():
         shutil.rmtree(out)
     shutil.copytree(SKILL_DIR, out)
@@ -322,15 +314,11 @@ print(f"\nOrchestrator setup — {len(resolved)} repo(s) found in config\n")
 for r in resolved:
     mcp_json_path = _write_mcp_json(r["path"])
     instructions_path = _write_copilot_instructions(r)
-    claude_mcp_path = _write_mcp_servers_json(r["path"] / ".mcp.json")
-    cursor_mcp_path = _write_mcp_servers_json(r["path"] / ".cursor" / "mcp.json")
     skill_path = _install_skill(r["path"])
     ignored = _gitignore_index(r["path"])
     print(f"  ✓ {r['name']}")
     print(f"      mcp.json            → {mcp_json_path}")
     print(f"      copilot-instructions→ {instructions_path}")
-    print(f"      claude code mcp     → {claude_mcp_path}")
-    print(f"      cursor mcp          → {cursor_mcp_path}")
     print(f"      skill               → {skill_path}")
     if ignored:
         print(f"      .gitignore          → added {INDEX_DIR_NAME}/")
@@ -344,11 +332,9 @@ print(f"""
 Setup complete.
 
 Next:
-  VS Code + Copilot: open each repo (reload windows already open), switch Copilot
-                     chat to Agent mode
-  Claude Code:       run `claude` inside any repo and approve the project MCP servers
-  Cursor:            open any repo and enable the MCP servers in Settings → MCP
-  Then type a feature request and watch the live log:
+  Open each repo in VS Code (reload windows that are already open), allow the MCP
+  servers when asked, switch Copilot Chat to Agent mode and start requests with
+  /cross-repo-feature-analysis. Watch the live log:
 
        tail -f {log_file}
 """)
