@@ -1,0 +1,42 @@
+# Repo agent configuration — the ONLY file you edit per repo.
+# The guided setup (skills/cross-repo-feature-analysis/scripts/configure.py) fills it in.
+# After editing by hand, run:  python <framework>/orchestrator/setup.py
+
+# Must match the name used in orchestrator/mcp/config.yaml
+repo_name: my-repo
+
+# Human-readable name shown in routing output and Copilot chat
+display_name: My Repo
+
+# What to index. "." = the whole repo (recommended): dependencies, build output,
+# virtual environments and caches are skipped automatically, and folder roles keep
+# tests, generated and vendored code out of results. A path, glob or list also works:
+#   src_path: [./src, ./include, ./idl]
+src_path: .
+
+# Extra documentation folders outside src_path (Markdown is indexed by heading section).
+knowledge_path: ./knowledge
+
+# What unknown file types contain — the developer's answers, recorded by setup.
+#   kind:     implementation, interface, config, docs, data, … or ignore
+#   parse_as: c, cpp, python, idl, perl, matlab, java, javascript, typescript, go,
+#             rust, csharp, markdown, text
+# file_types:
+#   .xidl: {kind: interface, parse_as: idl}            # in-house IDL dialect
+#   .pc:   {kind: implementation, parse_as: c}         # Pro*C
+#   .xcfg: {kind: server-config, parse_as: text}
+file_types: {}
+
+# Folder roles, when the automatic ones are wrong (first match wins).
+#   roles: interface, implementation, internal, external, library, test, build,
+#          generated, docs, tooling, config, data, example
+#   index: full (default), signatures (bodies omitted — e.g. vendored code), skip
+# structure:
+#   - {path: "third_party/**", role: external, index: signatures}
+#   - {path: "api/**", role: interface}
+structure: []
+
+# Results per search, and the token budget for one answer. Units are always whole:
+# a unit that does not fit is listed under "more" (fetch with get_node), never cut.
+top_k: 5
+result_budget_tokens: 6000

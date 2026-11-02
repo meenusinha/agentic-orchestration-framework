@@ -1,0 +1,61 @@
+[
+ {
+  "directory": ".",
+  "file": "src/server.cpp",
+  "arguments": [
+   "g++",
+   "-Iinclude",
+   "-Igen",
+   "-Isrc",
+   "-c",
+   "src/server.cpp"
+  ]
+ },
+ {
+  "directory": ".",
+  "file": "src/session_notifier.cpp",
+  "arguments": [
+   "g++",
+   "-Iinclude",
+   "-Igen",
+   "-Isrc",
+   "-c",
+   "src/session_notifier.cpp"
+  ]
+ },
+ {
+  "directory": ".",
+  "file": "src/main.cpp",
+  "arguments": [
+   "g++",
+   "-Iinclude",
+   "-Igen",
+   "-Isrc",
+   "-c",
+   "src/main.cpp"
+  ]
+ },
+ {
+  "directory": ".",
+  "file": "policy/pwd_policy.c",
+  "arguments": [
+   "gcc",
+   "-Iinclude",
+   "-Igen",
+   "-Isrc",
+   "-c",
+   "policy/pwd_policy.c"
+  ]
+ },
+ {
+  "directory": ".",
+  "file": "include/pwd_policy.h",
+  "arguments": [
+   "gcc",
+   "-x",
+   "c",
+   "-c",
+   "include/pwd_policy.h"
+  ]
+ }
+]

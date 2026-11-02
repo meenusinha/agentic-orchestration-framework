@@ -1,0 +1,26 @@
+// Password service between the authd server process and its clients.
+#include "common.idl"
+
+module Auth {
+  enum Level { WEAK, FAIR, STRONG };
+
+  /** Result of a strength check. `hint` explains what to improve. */
+  struct Score {
+    Level  level;
+    long   points;
+    string hint;
+  };
+
+  exception PolicyError { string reason; };
+
+  /** Password policy, served by the authd process. */
+  interface IPasswordService : Common::IService {
+    readonly attribute long minLength;
+
+    /** Score a candidate password against the current policy. */
+    Score checkStrength(in string pw) raises (PolicyError);
+
+    /** Reload the policy from configuration. */
+    void reloadPolicy();
+  };
+};

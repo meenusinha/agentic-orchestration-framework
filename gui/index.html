@@ -1,0 +1,641 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Agentic Orchestration Setup</title>
+<style>
+:root{--bg:#ffffff;--panel:#ffffff;--soft:#f8fafc;--ink:#0f172a;--ink2:#334155;--muted:#64748b;--line:#e2e8f0;--line2:#eef2f6;
+--accent:#2563eb;--accent2:#1d4ed8;--accent-soft:#eff6ff;--accent-ink:#fff;--ok:#16a34a;--ok-soft:#f0fdf4;--warn:#b45309;--warn-soft:#fffbeb;
+--bad:#dc2626;--bad-soft:#fef2f2;--chip:#f1f5f9;--code:#f8fafc;--radius:12px;
+--shadow:0 1px 2px rgba(15,23,42,.04),0 1px 3px rgba(15,23,42,.06);--ring:0 0 0 3px rgba(37,99,235,.18);color-scheme:light}
+*{box-sizing:border-box}html,body{margin:0;background:var(--bg);color:var(--ink);
+font:14.5px/1.55 "Segoe UI",Roboto,"Noto Sans",Ubuntu,"Helvetica Neue",Arial,sans-serif;-webkit-font-smoothing:antialiased}
+::selection{background:#dbeafe}
+/* top bar: brand + query field, always visible */
+.topbar{position:sticky;top:0;z-index:5;background:rgba(255,255,255,.92);backdrop-filter:saturate(1.4) blur(8px);border-bottom:1px solid var(--line)}
+header{max-width:1240px;margin:0 auto;padding:14px 28px 6px;display:flex;align-items:center;gap:12px}
+.logo{width:30px;height:30px;border-radius:9px;background:linear-gradient(135deg,#2563eb,#7c3aed);display:grid;place-items:center;flex:none;box-shadow:0 2px 6px rgba(37,99,235,.3)}
+header h1{font-size:16.5px;margin:0;font-weight:650;letter-spacing:-.01em}header .fw{color:var(--muted);font-size:11.5px;word-break:break-all}
+.brand{display:flex;flex-direction:column;line-height:1.25}
+.qbar{max-width:1240px;margin:0 auto;padding:8px 28px 14px;display:flex;gap:8px;align-items:center;flex-wrap:wrap}
+.qwrap{flex:1;min-width:240px;position:relative;display:flex}.qwrap svg{position:absolute;left:13px;top:50%;transform:translateY(-50%);pointer-events:none}
+.qbar input[type=text]{flex:1;padding:10px 14px 10px 38px;border-radius:10px;background:var(--soft)}
+.qbar input[type=text]:focus{background-color:#fff}.qbar select{padding:9px 10px;border-radius:10px}.qbar button.primary{padding:10px 18px;border-radius:10px}
+.qbar .hint{font-size:12px;color:var(--muted);width:100%;padding-left:2px}.qbar .hint:empty{display:none}
+/* layout */
+.wrap>main{min-width:0}.saved,.unit .h,.kgd h3,.sub code{overflow-wrap:anywhere}
+.wrap{display:grid;grid-template-columns:230px 1fr;gap:32px;max-width:1240px;margin:28px auto 48px;padding:0 28px}
+@media (max-width:860px){.wrap{grid-template-columns:1fr;gap:16px;padding:0 16px}header,.qbar{padding-left:16px;padding-right:16px}}
+nav{position:sticky;top:140px;align-self:start}.navlabel,nav li.sep::before{display:block;font-size:11px;font-weight:600;letter-spacing:.06em;text-transform:uppercase;color:#94a3b8;padding:0 12px 8px}
+nav ol{list-style:none;margin:0;padding:0}
+nav li{position:relative;display:flex;align-items:center;gap:12px;padding:8px 12px;border-radius:10px;color:var(--muted);cursor:default;font-size:14px;transition:background .15s}
+nav li:nth-child(-n+5)::after{content:"";position:absolute;left:23px;top:34px;height:14px;width:1.5px;background:var(--line)}
+nav li.reach{cursor:pointer}nav li.reach:hover{background:var(--soft);color:var(--ink2)}
+nav li.active{background:var(--accent-soft);color:var(--accent2);font-weight:600}
+nav .dot{width:24px;height:24px;border-radius:50%;border:1.5px solid #cbd5e1;background:#fff;display:grid;place-items:center;font-size:11.5px;font-weight:600;flex:none}
+nav li.done .dot{background:var(--ok);border-color:var(--ok);color:#fff}nav li.active .dot{border-color:var(--accent);background:var(--accent);color:#fff}
+nav li.sep{margin-top:40px}
+nav li.sep::before{content:"Explore";position:absolute;left:0;top:-28px;padding:0 12px}
+main section{display:none;background:var(--panel);border:1px solid var(--line);border-radius:16px;padding:30px 32px;box-shadow:var(--shadow)}
+main section.active{display:block;animation:fade .18s ease-out}@keyframes fade{from{opacity:0;transform:translateY(3px)}to{opacity:1;transform:none}}
+h2{font-size:21px;margin:0 0 6px;font-weight:650;letter-spacing:-.015em}p.sub{color:var(--muted);margin:0 0 22px;max-width:760px}
+h3{color:var(--ink)}
+/* controls */
+button{font:inherit;font-size:14px;border-radius:9px;border:1px solid var(--line);background:#fff;color:var(--ink2);padding:8px 15px;cursor:pointer;
+transition:background .15s,border-color .15s,box-shadow .15s;box-shadow:0 1px 1px rgba(15,23,42,.03)}
+button:hover:not(:disabled){background:var(--soft);border-color:#cbd5e1}button:focus-visible{outline:none;box-shadow:var(--ring)}
+button.primary{background:var(--accent);border-color:var(--accent);color:var(--accent-ink);font-weight:600;box-shadow:0 1px 2px rgba(37,99,235,.25)}
+button.primary:hover:not(:disabled){background:var(--accent2);border-color:var(--accent2)}
+button:disabled{opacity:.45;cursor:not-allowed}button.link{border:0;background:none;color:var(--accent);padding:0;box-shadow:none;font-weight:500}
+button.link:hover:not(:disabled){background:none;text-decoration:underline}
+select,input[type=text]{font:inherit;font-size:14px;padding:8px 11px;border-radius:9px;border:1px solid var(--line);background:#fff;color:var(--ink);max-width:100%;transition:border-color .15s,box-shadow .15s}
+select:focus,input[type=text]:focus{outline:none;border-color:#93c5fd;box-shadow:var(--ring)}input::placeholder{color:#94a3b8}
+select.need{border-color:var(--bad);box-shadow:0 0 0 3px rgba(220,38,38,.12)}
+.row{display:flex;gap:10px;align-items:center;flex-wrap:wrap}.spacer{flex:1}
+.status{display:inline-flex;gap:9px;align-items:center;padding:9px 14px;border-radius:10px;background:var(--chip);margin-bottom:16px;font-size:14px;color:var(--ink2)}
+.status:has(b.ok){background:var(--ok-soft)}.status:has(b.warn){background:var(--warn-soft)}
+.ok{color:var(--ok)}.warn{color:var(--warn)}.bad{color:var(--bad)}
+.log{font:12px/1.5 ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;background:var(--code);color:var(--ink2);border:1px solid var(--line);
+border-radius:10px;padding:12px 14px;max-height:260px;overflow:auto;white-space:pre-wrap;word-break:break-word;margin-top:16px;display:none}
+.card{border:1px solid var(--line);border-radius:var(--radius);padding:18px 20px;margin:14px 0;background:#fff}
+.card h3{margin:0 0 10px;font-size:15px;font-weight:600}.chips{display:flex;flex-wrap:wrap;gap:6px}
+.chip{background:var(--chip);border:1px solid var(--line2);border-radius:999px;padding:3px 11px;font-size:12px;color:var(--ink2)}
+table{width:100%;border-collapse:collapse;margin:8px 0}th,td{text-align:left;padding:9px 10px;border-bottom:1px solid var(--line2);vertical-align:top}
+th{font-size:11.5px;color:var(--muted);font-weight:600;text-transform:uppercase;letter-spacing:.04em;background:var(--soft)}
+th:first-child{border-top-left-radius:8px}th:last-child{border-top-right-radius:8px}
+code,.mono{font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;font-size:12.5px}
+p code,.sub code,.small code{background:var(--chip);padding:1px 5px;border-radius:5px}
+.repo{display:grid;grid-template-columns:170px 1fr auto;gap:12px;align-items:center;padding:10px 0;border-bottom:1px solid var(--line2)}
+.repo:last-child{border-bottom:0}.path{color:var(--muted);word-break:break-all;font-size:12.5px}
+.sugg{display:flex;justify-content:space-between;gap:10px;padding:6px 0;font-size:13px;border-bottom:1px dashed var(--line2)}
+.modal{position:fixed;inset:0;background:rgba(15,23,42,.35);backdrop-filter:blur(2px);display:none;place-items:center;padding:16px;z-index:9}
+.modal.open{display:grid}.sheet{background:#fff;border-radius:16px;width:min(700px,100%);max-height:80vh;display:flex;flex-direction:column;border:1px solid var(--line);box-shadow:0 20px 50px rgba(15,23,42,.18)}
+.sheet .hd{padding:16px 18px;border-bottom:1px solid var(--line)}.sheet .bd{overflow:auto;padding:8px 10px}
+.sheet .ft{padding:14px 18px;border-top:1px solid var(--line);display:flex;gap:10px;justify-content:flex-end;align-items:center}
+.dir{display:flex;gap:10px;align-items:center;padding:8px 12px;border-radius:9px;cursor:pointer}.dir:hover{background:var(--accent-soft)}
+.badge{font-size:11px;padding:1px 8px;border-radius:999px;background:var(--ok-soft);color:var(--ok);font-weight:600}
+.cmd{display:flex;gap:8px;align-items:center;background:var(--code);border:1px solid var(--line);border-radius:10px;padding:8px 10px;margin:6px 0 12px}
+.cmd code{flex:1;word-break:break-all}.err{color:var(--bad);margin-top:12px;font-size:13.5px}
+.addgrid{display:grid;grid-template-columns:1fr 1fr;gap:16px;margin-top:18px}@media (max-width:960px){.addgrid{grid-template-columns:1fr}}
+.addgrid .card{margin:0;background:var(--soft);border-color:var(--line2)}.field{display:flex;flex-direction:column;gap:5px;margin:10px 0}.field label{font-size:12.5px;color:var(--muted);font-weight:500}
+.field input{width:100%}.field .row input{flex:1}
+.iface{border:1px solid var(--line);border-left:3px solid var(--accent);border-radius:10px;padding:10px 14px;margin:10px 0;background:#fff}
+.small{font-size:12.5px;color:var(--muted)}
+pre.src{font:12px/1.55 ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;background:var(--code);color:#1e293b;border:1px solid var(--line);border-radius:10px;padding:12px 14px;overflow:auto;max-height:440px;margin:8px 0}
+.unit{border:1px solid var(--line);border-radius:var(--radius);padding:14px 16px;margin:12px 0;background:#fff;transition:border-color .15s}
+.unit:hover{border-color:#cbd5e1}.unit .h{font-weight:600;margin-bottom:2px}
+details summary{cursor:pointer;color:var(--muted);font-size:12.5px;padding:2px 0}details summary:hover{color:var(--ink2)}
+.saved{font-size:12.5px;color:var(--muted);margin:2px 0 14px;padding:8px 12px;background:var(--ok-soft);border-radius:9px}
+/* knowledge graph */
+.kg{display:grid;grid-template-columns:minmax(340px,46%) minmax(0,1fr);gap:18px;align-items:start}@media (max-width:1040px){.kg{grid-template-columns:1fr}}
+.kgtree{border:1px solid var(--line);border-radius:var(--radius);padding:10px 8px;max-height:72vh;overflow:auto;font-size:13px;background:#fff}
+.kgtree ul{list-style:none;margin:0;padding-left:16px;border-left:1px solid var(--line2);margin-left:7px}.kgtree>ul{padding-left:0;border:0;margin:0}
+.tn{display:flex;align-items:center;gap:7px;padding:3px 8px;border-radius:7px;cursor:pointer;white-space:nowrap}
+.tn:hover{background:var(--soft)}.tn.sel{background:var(--accent-soft);box-shadow:inset 2px 0 0 var(--accent)}
+.tw{width:14px;flex:none;color:#94a3b8;text-align:center;font-size:10px}.tname{color:var(--ink2)}
+.kgtree>ul{min-width:max-content}
+.tn.sel .tname{color:var(--ink);font-weight:500}
+.k{font:600 10px/1.7 ui-monospace,Menlo,Consolas,monospace;padding:0 6px;border-radius:5px;background:var(--chip);color:var(--muted);flex:none}
+.k.class,.k.idl_interface{background:#f5f3ff;color:#7c3aed}.k.method,.k.function,.k.idl_operation,.k.idl_attribute{background:#ecfdf5;color:#059669}
+.k.target{background:#fffbeb;color:#b45309}.k.repok{background:#eff6ff;color:var(--accent)}.k.folder,.k.group{background:transparent;padding:0}
+.rb{font-size:10.5px;color:#94a3b8}.rb.test{color:#b45309}.rb.external,.rb.generated{color:#a3aab5}.rb.interface{color:#7c3aed}.rb.docs{color:#0891b2}
+.kgd{border:1px solid var(--line);border-radius:var(--radius);padding:18px 20px;position:sticky;top:150px;max-height:76vh;overflow:auto;background:#fff}
+.kgd h3{margin:0 0 4px;font-size:16px;word-break:break-all}.lk{display:block;padding:3px 0;font-size:12.5px;cursor:pointer;color:var(--accent)}
+.lk:hover{text-decoration:underline}.lk .r{color:var(--muted)}#kgFound .lk{font-weight:400}.lk.xr{font-weight:600}
+.lgroup{margin:12px 0;padding-top:10px;border-top:1px solid var(--line2)}.lgroup b{font-size:11.5px;color:var(--muted);text-transform:uppercase;letter-spacing:.04em}
+.hist{display:flex;justify-content:space-between;align-items:center;gap:10px;padding:9px 4px;border-bottom:1px solid var(--line2);font-size:13px}
+.hist:last-child{border-bottom:0}.hist:hover{background:var(--soft)}
+</style>
+</head>
+<body>
+<div class="topbar">
+<header>
+  <div class="logo" aria-hidden="true"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="#fff" stroke-width="2.2" stroke-linecap="round"><circle cx="5" cy="6" r="2.4"/><circle cx="19" cy="6" r="2.4"/><circle cx="12" cy="18" r="2.4"/><path d="M7.2 7.2 10.6 16M16.8 7.2 13.4 16M7.4 6h9.2"/></svg></div>
+  <div class="brand"><h1>Agentic Orchestration</h1><span class="fw" id="fw"></span></div>
+</header>
+<form class="qbar" id="qbar" autocomplete="off">
+  <select id="qmode" title="What kind of query">
+    <option value="search">Search</option><option value="trace">Trace interface</option><option value="impact">Impact of change</option>
+  </select>
+  <select id="qrepo" title="Which repositories"><option value="">All repositories</option></select>
+  <div class="qwrap"><svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="#64748b" stroke-width="2" stroke-linecap="round" aria-hidden="true"><circle cx="7" cy="7" r="5"/><path d="m14 14-3.5-3.5"/></svg>
+  <input type="text" id="qtext" placeholder="Ask about the code, e.g. which processes are affected if PWD_MIN_LEN changes?"></div>
+  <button class="primary" id="qrun" type="submit">Run query</button>
+  <div class="hint" id="qhint"></div>
+</form>
+</div>
+<div class="wrap">
+  <nav><div class="navlabel">Setup</div><ol id="steps"></ol></nav>
+  <main>
+    <section data-step="install">
+      <h2>1. Install</h2>
+      <p class="sub">Installs the hash-verified Python packages into the framework's own virtual environment. Nothing is installed into your system Python.</p>
+      <div id="installStatus"></div>
+      <div class="row"><button class="primary" id="installBtn">Install</button><span class="spacer"></span><button id="installNext" class="primary">Continue</button></div>
+      <div class="log" id="installLog"></div>
+    </section>
+
+    <section data-step="model">
+      <h2>2. Embedding model</h2>
+      <p class="sub">Point to your copy of the approved model <code>ibm-granite/granite-embedding-small-english-r2</code> (Apache 2.0, ~95&nbsp;MB). It is copied into the framework and checked against its pinned SHA-256 — nothing is downloaded.</p>
+      <div id="modelStatus"></div>
+      <div id="modelChoices"></div>
+      <div class="log" id="modelLog"></div>
+    </section>
+
+    <section data-step="repos">
+      <h2>3. Repositories</h2>
+      <p class="sub">Which repositories should be connected? Add at least two — for example the repo that holds the IDL interfaces, the server and the clients. Add each one either from a folder you have already cloned, or from its Git URL and branch.</p>
+      <div id="repoList"></div>
+      <div class="addgrid">
+        <div class="card">
+          <h3>Already cloned</h3>
+          <p class="small">Pick the repository's folder on this computer.</p>
+          <button id="addRepo">Choose folder…</button>
+          <div id="suggest" style="margin-top:12px"></div>
+        </div>
+        <div class="card">
+          <h3>Clone from Git</h3>
+          <div class="field"><label for="cUrl">Repository URL</label><input type="text" id="cUrl" placeholder="https://git.example.com/team/repo.git  or  git@git.example.com:team/repo.git"></div>
+          <div class="field"><label for="cBranch">Branch</label><input type="text" id="cBranch" placeholder="leave empty for the default branch"></div>
+          <div class="field"><label for="cParent">Clone into this folder</label>
+            <div class="row"><input type="text" id="cParent" placeholder="choose where to clone" readonly><button id="cChoose">Choose…</button></div></div>
+          <div class="field"><label for="cName">Folder name</label><input type="text" id="cName" placeholder="from the URL"></div>
+          <div class="row"><button class="primary" id="cGo" disabled>Clone and add</button><span class="small" id="cWhere"></span></div>
+          <div class="small" id="cSamples" style="margin-top:10px"></div>
+          <div class="log" id="cLog"></div>
+        </div>
+      </div>
+      <div class="row" style="margin-top:16px"><span class="spacer"></span><button class="primary" id="reposNext">Continue</button></div>
+    </section>
+
+    <section data-step="review">
+      <h2>4. Review</h2>
+      <p class="sub">What the scan found in each repository. Correct any folder role, and tell us what unknown file types contain — nothing is guessed silently.</p>
+      <div id="reviewBody">Scanning…</div>
+      <div class="row" style="margin-top:14px"><span class="spacer"></span><button class="primary" id="reviewNext">Continue</button></div>
+      <div class="err" id="reviewErr"></div>
+    </section>
+
+    <section data-step="configure">
+      <h2>5. Configure</h2>
+      <p class="sub">Writes each repository's settings, connects the repos to each other and generates the VS Code + GitHub Copilot configuration (MCP servers, Copilot instructions and the agent skill).</p>
+      <div id="configSummary"></div>
+      <div class="row"><button class="primary" id="configureBtn">Configure</button></div>
+      <div class="log" id="configLog"></div>
+    </section>
+
+    <section data-step="verify">
+      <h2>6. Create GraphRAG</h2>
+      <p class="sub" id="createAsk">Create the GraphRAG for these repositories now? It parses every repository into whole functions, classes and IDL operations, links them across repositories and builds the search index — locally, no AI service involved. The first build takes a while.</p>
+      <div class="row"><button class="primary" id="verifyBtn">Yes, create the GraphRAG</button></div>
+      <div class="log" id="verifyLog"></div>
+      <div id="verifyResult"></div>
+    </section>
+    <section data-step="graph">
+      <h2>Knowledge graph</h2>
+      <p class="sub">Browse what the GraphRAG holds: every repository as a tree of folders, files, classes, functions and IDL operations — each a complete unit. Click a node to see its code and its links, including links to and from other repositories.</p>
+      <div class="chips" id="kgStats" style="margin-bottom:10px"></div>
+      <div class="row" style="margin-bottom:10px"><input type="text" id="kgFind" placeholder="Find a function, class, interface or operation…" style="flex:1"><button id="kgFindBtn">Find</button><button id="kgCollapse">Collapse all</button></div>
+      <div id="kgFound"></div>
+      <div class="kg"><div class="kgtree" id="kgTree"></div><div class="kgd" id="kgDetail"><p class="small">Select a node in the tree.</p></div></div>
+    </section>
+
+    <section data-step="queries">
+      <h2>Queries</h2>
+      <p class="sub">Use the query field at the top. Every result is also saved as a new Markdown file in <code id="resDir"></code> — earlier results are never overwritten.</p>
+      <div id="qresult"></div>
+      <h3 style="font-size:15px;margin-top:22px">Saved results</h3>
+      <div id="history" class="small">None yet.</div>
+    </section>
+  </main>
+</div>
+
+<div class="modal" id="picker"><div class="sheet">
+  <div class="hd"><div class="row"><button id="pkUp">↑ Up</button><code id="pkPath" class="mono"></code></div></div>
+  <div class="bd" id="pkList"></div>
+  <div class="ft"><span class="small spacer" id="pkHint"></span><button id="pkCancel">Cancel</button><button class="primary" id="pkSelect">Select this folder</button></div>
+</div></div>
+
+<script>
+const T = new URLSearchParams(location.hash.slice(1)).get("t") || "";
+const STEPS = [["install","Install"],["model","Model"],["repos","Repositories"],["review","Review"],["configure","Configure"],["verify","Create GraphRAG"]];
+const ROLES = ["interface","implementation","internal","external","library","test","build","generated","docs","tooling","config","data","example"];
+const KINDS = ["implementation","interface","server-config","config","docs","data","ignore"];
+const LANGS = ["c","cpp","python","idl","perl","matlab","java","javascript","typescript","go","rust","csharp","markdown","text"];
+let S = {}, done = new Set(), cur = "install", repos = [], scans = [], answers = {};
+
+const $ = s => document.querySelector(s);
+const esc = s => String(s ?? "").replace(/[&<>"']/g, c => ({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]));
+async function api(path, body) {
+  const r = await fetch(path, body === undefined ? {headers:{"X-Token":T}} :
+    {method:"POST", headers:{"X-Token":T,"Content-Type":"application/json"}, body:JSON.stringify(body)});
+  const j = await r.json(); if (!r.ok) throw new Error(j.error || r.statusText); return j;
+}
+function runJob(start, logEl) {
+  return new Promise(async (resolve, reject) => {
+    let id; try { id = (await start()).job; } catch (e) { return reject(e); }
+    logEl.style.display = "block"; logEl.textContent = ""; let since = 0;
+    const tick = async () => {
+      try {
+        const j = await api(`/api/job/${id}?since=${since}`); since = j.next;
+        if (j.lines.length) { logEl.textContent += j.lines.join("\n") + "\n"; logEl.scrollTop = logEl.scrollHeight; }
+        if (j.done) return j.ok ? resolve(j.result) : reject(new Error((j.lines.slice(-1)[0]||"failed").replace(/^ERROR: /,"")));
+        setTimeout(tick, 600);
+      } catch (e) { reject(e); }
+    }; tick();
+  });
+}
+function nav() {
+  $("#steps").innerHTML = STEPS.map(([k,l],i) => {
+    const reach = i === 0 || done.has(STEPS[i-1][0]) || done.has(k);
+    return `<li class="${k===cur?"active":""} ${done.has(k)?"done":""} ${reach?"reach":""}" data-k="${k}"><span class="dot">${done.has(k)?"✓":i+1}</span>${l}</li>`;
+  }).join("") + `<li class="sep ${cur==="queries"?"active":""} ${S.graph_ready?"reach":""}" data-k="queries"><span class="dot">?</span>Queries</li>`
+    + `<li class="${cur==="graph"?"active":""} ${S.graph_ready?"reach":""}" data-k="graph"><span class="dot">⌥</span>Knowledge graph</li>`;
+  qbarState();
+  document.querySelectorAll("nav li.reach").forEach(li => li.onclick = () => go(li.dataset.k));
+  document.querySelectorAll("main section").forEach(s => s.classList.toggle("active", s.dataset.step === cur));
+}
+function go(k) { cur = k; nav(); ({model:showModel, repos:showRepos, review:showReview, configure:showConfigure, queries:showHistory, graph:showGraph})[k]?.(); window.scrollTo(0,0); }
+function finish(k, next) { done.add(k); go(next); }
+const status = (ok, text) => `<div class="status"><b class="${ok?"ok":"warn"}">${ok?"✓":"●"}</b>${text}</div>`;
+
+/* 1 install */
+async function showInstall() {
+  $("#installStatus").innerHTML = status(S.deps_ok, S.deps_ok ? "Packages installed in <code>"+esc(S.python)+"</code>" : "Packages not installed yet");
+  $("#installBtn").style.display = S.deps_ok ? "none" : ""; $("#installNext").disabled = !S.deps_ok;
+}
+$("#installBtn").onclick = async () => {
+  $("#installBtn").disabled = true;
+  try { await runJob(() => api("/api/install", {}), $("#installLog")); S = await api("/api/state"); showInstall(); finish("install","model"); }
+  catch (e) { $("#installStatus").innerHTML = status(false, `<span class="bad">${esc(e.message)}</span>`); }
+  $("#installBtn").disabled = false;
+};
+$("#installNext").onclick = () => finish("install","model");
+
+/* 2 model */
+function showModel() {
+  if (S.model_ok) {
+    $("#modelStatus").innerHTML = status(true, "Model ready in <code>"+esc(S.model_dir)+"</code>");
+    $("#modelChoices").innerHTML = `<button class="primary" id="modelNext">Continue</button>`;
+    $("#modelNext").onclick = () => finish("model","repos"); return;
+  }
+  $("#modelStatus").innerHTML = status(false, "The model is not copied yet.");
+  const copies = (S.model_copies||[]).map(c => `<div class="cmd"><code>${esc(c)}</code><button data-copy="${esc(c)}">Use this copy</button></div>`).join("");
+  $("#modelChoices").innerHTML = `
+    ${copies ? `<h3 style="font-size:14px;margin:8px 0">Copies found on this computer</h3>${copies}` : ""}
+    <h3 style="font-size:14px;margin:16px 0 8px">Folder that holds the model</h3>
+    <div class="row"><input type="text" id="modelPath" placeholder="/path/to/granite-embedding-small-english-r2" style="flex:1;min-width:260px">
+    <button id="modelBrowse">Browse…</button><button class="primary" id="modelUse">Copy model</button></div>
+    <p class="small">The folder must contain <code>model.safetensors</code> and the model's JSON files (a Hugging Face snapshot folder works).</p>`;
+  document.querySelectorAll("[data-copy]").forEach(b => b.onclick = () => installModel({mode:"copy", path:b.dataset.copy}));
+  $("#modelBrowse").onclick = () => pick(p => $("#modelPath").value = p);
+  $("#modelUse").onclick = () => $("#modelPath").value && installModel({mode:"copy", path:$("#modelPath").value});
+}
+async function installModel(body) {
+  document.querySelectorAll("#modelChoices button").forEach(b => b.disabled = true);
+  try { await runJob(() => api("/api/model", body), $("#modelLog")); S = await api("/api/state"); finish("model","repos"); }
+  catch (e) { $("#modelStatus").innerHTML = status(false, `<span class="bad">${esc(e.message)}</span>`);
+    document.querySelectorAll("#modelChoices button").forEach(b => b.disabled = false); }
+}
+
+/* 3 repos */
+const slug = p => p.split(/[\\/]/).filter(Boolean).pop().toLowerCase().replace(/[^a-z0-9_-]+/g,"-").replace(/^-|-$/g,"") || "repo";
+function addRepo(path) {
+  if (repos.some(r => r.path === path)) return;
+  let name = slug(path), n = 2; while (repos.some(r => r.name === name)) name = slug(path) + "-" + n++;
+  repos.push({name, path}); showRepos();
+}
+function showRepos() {
+  $("#repoList").innerHTML = repos.length ? repos.map((r,i) => `<div class="repo">
+      <input type="text" value="${esc(r.name)}" data-i="${i}" class="rname" title="Short id for this repo">
+      <span class="path">${esc(r.path)}</span><button class="link" data-rm="${i}">Remove</button></div>`).join("")
+    : `<p class="small">No repositories yet.</p>`;
+  document.querySelectorAll(".rname").forEach(inp => inp.onchange = () => repos[+inp.dataset.i].name = inp.value.trim().replace(/[^A-Za-z0-9_-]+/g,"-"));
+  document.querySelectorAll("[data-rm]").forEach(b => b.onclick = () => { repos.splice(+b.dataset.rm,1); showRepos(); });
+  const sug = (S.suggestions||[]).filter(p => !repos.some(r => r.path === p));
+  showSamples(); cloneState();
+  $("#suggest").innerHTML = sug.length ? `<div class="small" style="margin-bottom:6px">Or one of these nearby repositories:</div>` +
+    sug.map(p => `<div class="sugg"><span class="path">${esc(p)}</span><button class="link" data-add="${esc(p)}">Add</button></div>`).join("") : "";
+  document.querySelectorAll("[data-add]").forEach(b => b.onclick = () => addRepo(b.dataset.add));
+  $("#reposNext").disabled = repos.length < 2 || new Set(repos.map(r => r.name)).size !== repos.length;
+}
+$("#addRepo").onclick = () => pick(addRepo);
+/* clone from Git: URL + branch, into a folder the user chooses */
+const urlName = u => (u.trim().replace(/[\/\\]+$/,"").split(/[\/:\\]/).pop() || "").replace(/\.git$/,"").replace(/[^A-Za-z0-9._-]+/g,"-");
+let nameTouched = false;
+function cloneState() {
+  if (!nameTouched) $("#cName").value = urlName($("#cUrl").value);
+  const ok = $("#cUrl").value.trim() && $("#cParent").value && $("#cName").value.trim();
+  $("#cGo").disabled = !ok || !S.git;
+  $("#cWhere").textContent = ok ? "→ " + $("#cParent").value.replace(/[\/\\]$/,"") + (S.home && S.home.includes("\\") ? "\\" : "/") + $("#cName").value.trim() : "";
+}
+$("#cUrl").oninput = cloneState; $("#cBranch").oninput = cloneState;
+$("#cName").oninput = () => { nameTouched = !!$("#cName").value; cloneState(); };
+$("#cChoose").onclick = () => pick(p => { $("#cParent").value = p; cloneState(); }, $("#cParent").value || S.home);
+$("#cGo").onclick = async () => {
+  $("#cGo").disabled = true;
+  try {
+    const res = await runJob(() => api("/api/clone", {url:$("#cUrl").value.trim(), branch:$("#cBranch").value.trim(),
+                                                      parent:$("#cParent").value, name:$("#cName").value.trim()}), $("#cLog"));
+    addRepo(res.path);
+    $("#cUrl").value = ""; $("#cBranch").value = ""; $("#cName").value = ""; nameTouched = false;  // keep the folder for the next one
+  } catch (e) { $("#cLog").style.display = "block"; $("#cLog").textContent += "\nERROR: " + e.message; }
+  cloneState();
+};
+function showSamples() {
+  if (!S.git) { $("#cSamples").innerHTML = `<span class="warn">Git is not installed — install it from git-scm.com to clone here, or clone the repos yourself and choose their folders.</span>`; return; }
+  $("#cSamples").innerHTML = (S.samples||[]).length ? "Presets: " + S.samples.map((x,i) =>
+    `<button class="link" data-sample="${i}">${esc(x.name)}</button>`).join(" · ") + ` <span class="small">(fills in the URL and branch)</span>` : "";
+  document.querySelectorAll("[data-sample]").forEach(b => b.onclick = () => {
+    const x = S.samples[+b.dataset.sample]; $("#cUrl").value = x.url; $("#cBranch").value = x.branch; nameTouched = false; cloneState();
+    if (!$("#cParent").value) $("#cChoose").click();
+  });
+}
+$("#reposNext").onclick = () => { scans = []; finish("repos","review"); };
+
+/* 4 review */
+async function showReview() {
+  $("#reviewErr").textContent = "";
+  if (!scans.length) {
+    $("#reviewBody").innerHTML = "Scanning…"; $("#reviewNext").disabled = true;
+    try { scans = (await api("/api/scan", {repos})).repos; } catch (e) { $("#reviewBody").innerHTML = `<p class="bad">${esc(e.message)}</p>`; return; }
+    answers = {};
+    scans.forEach(sc => { answers[sc.name] = {roles:{}, types:{}};
+      (sc.folders||[]).forEach(f => answers[sc.name].roles[f.folder] = f.role);
+      (sc.unknown_types||[]).forEach(u => answers[sc.name].types[u.ext] = {kind:u.kind||"", parse_as:u.parse_as||""}); });
+  }
+  const sel = (opts, v, cls, attrs) => `<select class="${cls}" ${attrs}>${opts.map(o => `<option ${o===v?"selected":""}>${o}</option>`).join("")}</select>`;
+  $("#reviewBody").innerHTML = scans.map(sc => {
+    if (!sc.ok) return `<div class="card"><h3>${esc(sc.name)}</h3><p class="bad">${esc(sc.error)}</p></div>`;
+    const a = answers[sc.name];
+    const procs = (sc.targets||[]).map(t => `<span class="chip">${esc(t.kind)}: ${esc(t.name)}</span>`).join("") || `<span class="small">no Makefile / CMake targets found</span>`;
+    const ifs = (sc.interfaces||[]).map(i => `<span class="chip">${esc(i.name)} (${i.operations.length} ops)</span>`).join("") || `<span class="small">none</span>`;
+    const langs = Object.entries(sc.languages||{}).map(([l,n]) => `<span class="chip">${esc(l)} ${n}</span>`).join("");
+    const folders = (sc.folders||[]).map(f => `<tr><td><code>${esc(f.folder ? f.folder+"/" : "(top level)")}</code></td><td>${f.files}</td>
+      <td>${f.folder ? sel(ROLES, a.roles[f.folder], "role", `data-r="${esc(sc.name)}" data-f="${esc(f.folder)}"`) : esc(f.role)}</td></tr>`).join("");
+    const unk = (sc.unknown_types||[]).map(u => { const t = a.types[u.ext];
+      return `<tr><td><code>${esc(u.ext)}</code><div class="small">${u.count} file(s), e.g. ${esc(u.sample)}</div><div class="small">looks like ${esc(u.looks_like)}</div></td>
+      <td>${sel(["", ...KINDS], t.kind, "kind" + (t.kind ? "" : " need"), `data-r="${esc(sc.name)}" data-e="${esc(u.ext)}"`)}</td>
+      <td>${t.kind === "ignore" ? "<span class='small'>not indexed</span>" : sel(["", ...LANGS], t.parse_as, "lang" + (t.parse_as ? "" : " need"), `data-r="${esc(sc.name)}" data-e="${esc(u.ext)}"`)}</td></tr>`; }).join("");
+    return `<div class="card"><h3>${esc(sc.name)} <span class="small">${esc(sc.path)}</span></h3>
+      <div class="chips" style="margin-bottom:8px">${langs}</div>
+      <div class="small">Processes &amp; libraries</div><div class="chips" style="margin:4px 0 8px">${procs}</div>
+      <div class="small">IDL interfaces</div><div class="chips" style="margin:4px 0 8px">${ifs}</div>
+      ${sc.generated?.length ? `<div class="small">${sc.generated.length} generated file(s) detected — indexed as generated, ranked low</div>` : ""}
+      ${sc.secret_files ? `<div class="small">${sc.secret_files} secret-store file(s) will never be indexed</div>` : ""}
+      <table><tr><th>Folder</th><th>Files</th><th>Role</th></tr>${folders}</table>
+      ${unk ? `<h3 style="font-size:14px;margin-top:14px" class="warn">Unknown file types — what do they contain?</h3>
+      <table><tr><th>Type</th><th>Kind</th><th>Read as</th></tr>${unk}</table>` : ""}</div>`;
+  }).join("");
+  document.querySelectorAll("select.role").forEach(s => s.onchange = () => answers[s.dataset.r].roles[s.dataset.f] = s.value);
+  document.querySelectorAll("select.kind").forEach(s => s.onchange = () => { answers[s.dataset.r].types[s.dataset.e].kind = s.value; showReview(); });
+  document.querySelectorAll("select.lang").forEach(s => s.onchange = () => { answers[s.dataset.r].types[s.dataset.e].parse_as = s.value; showReview(); });
+  $("#reviewNext").disabled = false;
+}
+$("#reviewNext").onclick = () => {
+  const missing = [];
+  scans.forEach(sc => Object.entries(answers[sc.name]?.types||{}).forEach(([e,t]) => {
+    if (!t.kind || (t.kind !== "ignore" && !t.parse_as)) missing.push(`${sc.name}: ${e}`); }));
+  if (scans.some(sc => !sc.ok)) { $("#reviewErr").textContent = "Fix or remove the repositories with errors first."; return; }
+  if (missing.length) { $("#reviewErr").textContent = "Please choose what these file types contain: " + missing.join(", "); return; }
+  finish("review","configure");
+};
+
+/* 5 configure */
+function plan() {
+  return repos.map(r => { const sc = scans.find(s => s.name === r.name) || {}; const a = answers[r.name] || {roles:{}, types:{}};
+    const roles = (sc.folders||[]).filter(f => f.folder && a.roles[f.folder] !== f.role)
+      .map(f => ({path: f.folder + "/**", role: a.roles[f.folder], ...(a.roles[f.folder] === "external" ? {index:"signatures"} : {})}));
+    const types = {}; Object.entries(a.types).forEach(([e,t]) => types[e] = t.kind === "ignore" ? {kind:"ignore"} : t);
+    return {...r, roles, file_types: types}; });
+}
+function showConfigure() {
+  $("#configSummary").innerHTML = plan().map(r => `<div class="card"><h3>${esc(r.name)}</h3><div class="path">${esc(r.path)}</div>
+    <div class="small" style="margin-top:6px">${Object.keys(r.file_types).length ? "File types: " + Object.entries(r.file_types).map(([e,t]) => esc(e)+" → "+esc(t.kind)+(t.parse_as?" ("+esc(t.parse_as)+")":"")).join(", ") : "No unknown file types"}</div>
+    <div class="small">${r.roles.length ? "Role changes: " + r.roles.map(x => esc(x.path)+" → "+esc(x.role)).join(", ") : "Folder roles as proposed"}</div></div>`).join("");
+}
+$("#configureBtn").onclick = async () => {
+  $("#configureBtn").disabled = true;
+  try { await runJob(() => api("/api/configure", {repos: plan()}), $("#configLog")); S = await api("/api/state"); finish("configure","verify"); }
+  catch (e) { $("#configLog").textContent += "\n" + e.message; }
+  $("#configureBtn").disabled = false;
+};
+
+/* 6 verify */
+$("#verifyBtn").onclick = async () => {
+  $("#verifyBtn").disabled = true; $("#verifyResult").innerHTML = "";
+  try {
+    const res = await runJob(() => api("/api/verify", {}), $("#verifyLog")); done.add("verify");
+    S = await api("/api/state"); fillRepoSelect(); kgLoaded = false; nav();
+    const rows = res.repos.map(r => `<tr><td><b>${esc(r.name)}</b></td><td>${r.files}</td><td>${r.units}</td><td>${r.links}</td>
+      <td>${r.interfaces_defined.map(esc).join(", ") || "—"}</td><td>${r.unclassified.length ? `<span class="warn">${r.unclassified.map(esc).join(", ")}</span>` : "—"}</td></tr>`).join("");
+    const ifs = res.interfaces.map(i => `<div class="iface"><b>${esc(i.interface)}</b> <span class="small">defined in ${esc(i.defined_in)} · ${i.operations.map(esc).join(", ")}</span>
+      <div class="small">served by: ${i.providers.map(p => `${esc(p.repo)} / process ${esc(p.process)} (${esc(p.by)})`).join("; ") || "<span class='warn'>no provider found</span>"}</div>
+      <div class="small">called by: ${i.consumers.map(c => `${esc(c.repo)} / process ${esc(c.process)} (${esc(c.by)}${c.confidence < 0.8 ? ", confidence " + c.confidence : ""})`).join("; ") || "<span class='warn'>no caller found</span>"}</div></div>`).join("");
+    const first = res.repos[res.repos.length - 1]?.path || "";
+    const cmd = (t) => `<div class="cmd"><code>${esc(t)}</code><button data-c="${esc(t)}">Copy</button></div>`;
+    $("#verifyResult").innerHTML = `<div class="status"><b class="ok">✓</b>GraphRAG created — all repositories indexed and connected. Ask a question with the query field at the top.</div>
+      <table><tr><th>Repository</th><th>Files</th><th>Units</th><th>Links</th><th>IDL interfaces defined</th><th>Not indexed</th></tr>${rows}</table>
+      <h3 style="font-size:15px;margin-top:18px">Interfaces between processes</h3>${ifs || "<p class='small'>No IDL interfaces found.</p>"}
+      <h3 style="font-size:15px;margin-top:18px">Start using it</h3>
+      <div class="small">Open a repo in VS Code, allow the MCP servers when asked, switch Copilot Chat to <b>Agent</b> mode and start requests with <code>/cross-repo-feature-analysis</code>:</div>${cmd(`code "${first}"`)}
+      <div class="row" style="margin-top:16px"><button class="primary" id="toQueries">Run a query</button><button id="toGraph">Browse the knowledge graph</button><span class="spacer"></span><button id="quit">Close</button></div>`;
+    $("#toGraph").onclick = () => go("graph");
+    $("#toQueries").onclick = () => { go("queries"); $("#qtext").focus(); };
+    document.querySelectorAll("[data-c]").forEach(b => b.onclick = () => { navigator.clipboard?.writeText(b.dataset.c); b.textContent = "Copied"; });
+    $("#quit").onclick = async () => { await api("/api/quit", {}); document.body.innerHTML = "<p style='padding:40px'>Setup closed. You can close this tab.</p>"; };
+  } catch (e) { $("#verifyLog").textContent += "\n" + e.message; }
+  $("#verifyBtn").disabled = false;
+};
+
+/* queries — always available once the GraphRAG exists */
+function fillRepoSelect() {
+  $("#qrepo").innerHTML = `<option value="">All repositories</option>` + (S.repos||[]).map(r => `<option>${esc(r.name)}</option>`).join("");
+}
+function qbarState() {
+  const ok = !!S.graph_ready; ["#qmode","#qrepo","#qtext","#qrun"].forEach(x => $(x).disabled = !ok);
+  $("#qhint").textContent = ok ? "" : "Queries become available once the GraphRAG is created (step 6).";
+  const ph = {search:"Ask about the code, e.g. what would it take to show the policy hint in the login dialog?",
+              trace:"Interface or operation name, e.g. IPasswordService or checkStrength",
+              impact:"Function, method or IDL operation, e.g. pwd_policy_check"};
+  $("#qtext").placeholder = ph[$("#qmode").value];
+}
+$("#qmode").onchange = qbarState;
+$("#qbar").onsubmit = async (ev) => {
+  ev.preventDefault(); const text = $("#qtext").value.trim(); if (!text) return;
+  go("queries"); $("#qrun").disabled = true;
+  $("#qresult").innerHTML = `<div class="status"><b class="warn">●</b>Running ${esc($("#qmode").selectedOptions[0].text.toLowerCase())}… (the first query loads the model and graphs)</div>`;
+  try {
+    const r = await api("/api/query", {mode:$("#qmode").value, text, repo:$("#qrepo").value});
+    $("#qresult").innerHTML = `<div class="saved">Saved to <code>${esc(r.saved)}</code> · ${r.seconds}s</div>` + render(r.mode, r.result);
+    document.querySelectorAll("[data-graph]").forEach(b => b.onclick = () => { const [rp, id] = b.dataset.graph.split("|"); go("graph"); reveal(rp, id); });
+    showHistory();
+  } catch (e) { $("#qresult").innerHTML = `<p class="bad">${esc(e.message)}</p>`; }
+  $("#qrun").disabled = false;
+};
+const pre = (t) => `<pre class="src">${esc(t)}</pre>`;
+function unitHtml(n, parent, rel) {
+  const r = Object.entries(rel||{}).filter(([k]) => ["calls_operation","implements","tested_by","called_by","calls"].includes(k))
+    .map(([k,v]) => `<div class="small"><b>${esc(k.replace(/_/g," "))}:</b> ${v.slice(0,8).map(x => esc(x.name||x.qualname)).join(", ")}</div>`).join("");
+  return `<div class="unit"><div class="h">${esc(n.kind)} <code>${esc(n.qualname)}</code> ${n.id && n.repo ? `<button class="link small" data-graph="${esc(n.repo)}|${esc(n.id)}">show in graph</button>` : ""}</div>
+    <div class="small">${esc(n.file)}:${n.lines[0]}–${n.lines[1]}${n.process ? " · process <b>"+esc(n.process)+"</b>" : ""} · ${esc(n.role)}${n.ifdef ? " · #if "+esc(n.ifdef) : ""}</div>
+    ${parent && parent.skeleton && parent.skeleton !== "(shown above)" ? `<details><summary>in ${esc(parent.kind||"")} ${esc(parent.qualname)}</summary>${pre(parent.skeleton)}</details>` : ""}
+    ${pre(n.text)}${r}</div>`;
+}
+function traceHtml(t) {
+  if (!t || !t.found) return `<p class="small">Interface ${esc(t && t.interface)} not found.</p>`;
+  const d = t.defined_in;
+  return `<div class="iface"><b>${esc(t.interface)}</b> <span class="small">defined in ${esc(d.repo)} · ${esc(d.file)}:${d.lines[0]}–${d.lines[1]}</span>
+    ${t.definition_text ? `<details><summary>IDL definition</summary>${pre(t.definition_text)}</details>` : ""}
+    ${(t.providers||[]).map(p => `<div class="small" style="margin-top:6px"><b>Served by</b> ${esc(p.repo)} / process <b>${esc(p.process||"-")}</b> — ${esc(p.server_class)}</div>` +
+      (p.operations||[]).map(o => `<details><summary>${esc(o.operation)} → ${esc(o.qualname||"")}${o.tested_by && o.tested_by.length ? " · tested by "+o.tested_by.map(x=>esc(x.test)).join(", ") : ""}</summary>${o.text ? pre(o.text) : ""}</details>`).join("")).join("")}
+    ${(t.consumers||[]).map(c => `<details><summary><b>Called by</b> ${esc(c.repo)} / process <b>${esc(c.process||"-")}</b> — ${esc(c.caller)} (${esc(c.operation||"")}${c.confidence < 0.8 ? ", confidence "+c.confidence : ""})</summary>${c.text ? pre(c.text) : ""}</details>`).join("")}
+    ${(t.checks||[]).length ? `<div class="small warn">Checks: ${t.checks.map(esc).join("; ")}</div>` : ""}</div>`;
+}
+function render(mode, r) {
+  if (mode === "search") {
+    return r.repos.map(x => `<h3 style="font-size:15px;margin:14px 0 4px">${esc(x.repo)}</h3>` +
+        (x.hits.length ? x.hits.map(h => unitHtml(h.node, h.parent, h.relations)).join("") : `<p class="small">No relevant units.</p>`) +
+        (x.more.length ? `<div class="small">More: ${x.more.map(m => esc(m.qualname)).join(", ")}</div>` : "")).join("") +
+      (r.interfaces.length ? `<h3 style="font-size:15px;margin-top:18px">Interfaces involved</h3>` + r.interfaces.map(traceHtml).join("") : "");
+  }
+  if (mode === "trace") return traceHtml(r.trace);
+  if (!r.impact.length) return `<p class="small">Symbol not found in any repository.</p>`;
+  return r.impact.map(x => `<h3 style="font-size:15px;margin:14px 0 4px">${esc(x.repo)}</h3>` +
+    (x.local||[]).map(l => `<div class="unit"><div class="h">${esc(l.node.kind)} <code>${esc(l.node.qualname)}</code> <span class="small">${esc(l.node.file)}</span></div>
+      <div class="small"><b>Callers:</b> ${l.callers.map(c => esc(c.qualname)+" (level "+c.level+")").join(", ") || "none"}</div>
+      <div class="small"><b>Tested by:</b> ${l.tested_by.map(t => esc(t.test)).join(", ") || "no test evidence"}</div>
+      <div class="small"><b>Processes:</b> ${l.processes.map(esc).join(", ") || "-"}</div></div>`).join("") +
+    (x.interfaces||[]).filter(t => t.found).map(t => `<div class="iface"><b>Through IDL ${esc(t.interface)}</b>${t.via ? " (via "+esc(t.via)+")" : ""}
+      <div class="small">Clients affected: ${t.consumers.map(c => esc(c.repo)+" / "+esc(c.process||"-")+" "+esc(c.caller)).join("; ") || "none found"}</div></div>`).join("")).join("");
+}
+async function showHistory() {
+  $("#resDir").textContent = S.results_dir || "results/";
+  try {
+    const h = await api("/api/results");
+    $("#history").innerHTML = h.results.length ? h.results.map(x => `<div class="hist"><span><code>${esc(x.name)}</code></span><span>${esc(x.time)} <button class="link" data-res="${esc(x.name)}">View</button></span></div>`).join("") : "None yet.";
+    document.querySelectorAll("[data-res]").forEach(b => b.onclick = async () => {
+      const m = await api("/api/result?name=" + encodeURIComponent(b.dataset.res));
+      $("#qresult").innerHTML = `<div class="saved">Saved result <code>${esc(m.name)}</code></div>${pre(m.markdown)}`; window.scrollTo(0,0);
+    });
+  } catch (e) { $("#history").textContent = e.message; }
+}
+
+/* knowledge graph — read-only tree */
+let kgLoaded = false, kgSel = null;
+const KIND = {folder:"📁", group:"▤", file:"", target:"proc", idl_interface:"IDL", idl_operation:"op", idl_attribute:"attr",
+  idl_type:"type", class:"class", namespace:"ns", module:"mod", method:"m", function:"fn", function_decl:"decl",
+  field:"field", variable:"var", macro:"#def", type:"type", doc:"doc", doc_section:"§", text:"txt"};
+function kgNodeHtml(repo, c) {
+  const role = c.role && !["implementation"].includes(c.role) ? `<span class="rb ${esc(c.role)}">${esc(c.role)}${c.mixed ? "+" : ""}</span>` : "";
+  const proc = c.target && c.kind !== "target" ? `<span class="rb">${esc(c.target)}</span>` : "";
+  const cnt = c.kind === "folder" || c.kind === "group" ? `<span class="rb">${c.count}</span>` : "";
+  return `<li data-repo="${esc(repo)}" data-id="${esc(c.id)}" data-open="0"><div class="tn" data-has="${c.has_children ? 1 : 0}" data-sel="${["folder","group"].includes(c.kind) || c.id.startsWith("file:") ? 0 : 1}">
+    <span class="tw">${c.has_children ? "▸" : ""}</span><span class="k ${esc(c.kind)}">${esc(KIND[c.kind] ?? c.kind)}</span>
+    <span class="tname">${esc(c.name)}</span>${role}${proc}${cnt}${c.lines ? `<span class="rb">${esc(c.lines)}</span>` : ""}</div></li>`;
+}
+async function kgExpand(li, open = true) {
+  const tn = li.querySelector(":scope > .tn"); if (tn.dataset.has !== "1") return;
+  let ul = li.querySelector(":scope > ul");
+  if (!open) { if (ul) ul.style.display = "none"; li.dataset.open = "0"; tn.querySelector(".tw").textContent = "▸"; return; }
+  if (!ul) {
+    const node = li.dataset.id.startsWith("repo:") ? "" : li.dataset.id;          // a repo's root
+    const r = await api(`/api/graph/children?repo=${encodeURIComponent(li.dataset.repo)}&node=${encodeURIComponent(node)}`);
+    ul = document.createElement("ul"); ul.innerHTML = r.children.map(c => kgNodeHtml(li.dataset.repo, c)).join(""); li.appendChild(ul);
+  }
+  ul.style.display = ""; li.dataset.open = "1"; tn.querySelector(".tw").textContent = "▾";
+}
+$("#kgTree").onclick = async (ev) => {
+  const tn = ev.target.closest(".tn"); if (!tn) return; const li = tn.parentElement;
+  if (ev.target.classList.contains("tw") || tn.dataset.sel === "0") { await kgExpand(li, li.dataset.open !== "1"); if (tn.dataset.sel === "0") return; }
+  kgSelect(li);
+};
+async function kgSelect(li) {
+  document.querySelectorAll(".tn.sel").forEach(x => x.classList.remove("sel")); li.querySelector(":scope > .tn").classList.add("sel"); kgSel = li;
+  if (li.dataset.id.startsWith("repo:")) return kgRepoDetail(li.dataset.repo);
+  try { kgShow(await api(`/api/graph/node?repo=${encodeURIComponent(li.dataset.repo)}&uid=${encodeURIComponent(li.dataset.id)}`)); }
+  catch (e) { $("#kgDetail").innerHTML = `<p class="bad">${esc(e.message)}</p>`; }
+}
+function kgRepoDetail(repo) {
+  const o = (kgOverview || []).find(x => x.repo === repo) || {};
+  $("#kgDetail").innerHTML = `<h3>${esc(repo)}</h3><div class="small">${esc(o.path || "")}</div>
+    <div class="chips" style="margin:8px 0">${Object.entries(o.kinds || {}).sort((a,b) => b[1]-a[1]).map(([k,v]) => `<span class="chip">${esc(k)} ${v}</span>`).join("")}</div>
+    <div class="small">${o.files} files · ${o.nodes} nodes · ${o.links} links · ${o.cross_repo} to other repositories</div>`;
+}
+const linkHtml = (x, home) => `<span class="lk ${x.repo !== home ? "xr" : ""}" data-r="${esc(x.repo)}" data-u="${esc(x.uid)}" title="${esc(x.file || "")}">${esc(x.kind === "target" ? x.name : (x.qualname || x.name || x.uid))} <span class="r">${x.repo !== home ? "· " + esc(x.repo) : ""}${x.kind ? " · " + esc(x.kind) : ""}${x.confidence > 0 && x.confidence < 0.9 ? " · confidence " + x.confidence : ""}</span></span>`;
+function kgShow(n) {
+  const groups = (obj, arrow) => Object.entries(obj).map(([k, v]) => `<div class="lgroup"><b>${arrow} ${esc(k)}</b> <span class="rb">${v.length}</span>${v.slice(0, 60).map(x => linkHtml(x, n.repo)).join("")}</div>`).join("");
+  const links = groups(n.links_out, "→") + groups(n.links_in, "←");
+  $("#kgDetail").innerHTML = `<span class="k ${esc(n.kind)}">${esc(n.kind)}</span><h3 style="margin-top:6px">${esc(n.kind === "target" ? n.name : (n.qualname || n.name))}</h3>
+    <div class="small">${esc(n.repo)} · ${esc(n.file || "")}${n.start_line ? ":" + n.start_line + "–" + n.end_line : ""}${n.role ? " · " + esc(n.role) : ""}${n.target ? " · process <b>" + esc(n.target) + "</b>" : ""}${n.lang ? " · " + esc(n.lang) : ""}</div>
+    ${n.signature && n.signature !== n.text ? `<div class="small" style="margin-top:6px"><code>${esc(n.signature)}</code></div>` : ""}
+    ${n.doc ? `<div class="small" style="margin-top:6px">${esc(n.doc)}</div>` : ""}
+    ${links ? `<div style="margin-top:10px">${links}</div>` : `<p class="small">No links.</p>`}
+    ${n.text ? `<details ${n.is_container ? "" : "open"} style="margin-top:8px"><summary>${n.is_container ? "Outline" : "Complete code"} (${n.text.split("\n").length} lines)</summary><pre class="src">${esc(n.text)}</pre></details>` : ""}`;
+  document.querySelectorAll("#kgDetail .lk").forEach(a => a.onclick = () => reveal(a.dataset.r, a.dataset.u));
+}
+async function reveal(repo, uid) {
+  try {
+    const n = await api(`/api/graph/node?repo=${encodeURIComponent(repo)}&uid=${encodeURIComponent(uid)}`);
+    if (!kgLoaded) await showGraph();
+    let li = document.querySelector(`#kgTree > ul > li[data-repo="${CSS.escape(repo)}"]`); if (!li) return kgShow(n);
+    await kgExpand(li);
+    for (const id of n.path) {
+      const next = li.querySelector(`:scope > ul > li[data-id="${CSS.escape(id)}"]`); if (!next) break;
+      li = next; await kgExpand(li);
+    }
+    const target = li.querySelector(`:scope > ul > li[data-id="${CSS.escape(n.uid)}"]`) || li;
+    document.querySelectorAll(".tn.sel").forEach(x => x.classList.remove("sel"));
+    target.querySelector(":scope > .tn").classList.add("sel"); target.scrollIntoView({block: "center"}); kgShow(n);
+  } catch (e) { $("#kgDetail").innerHTML = `<p class="bad">${esc(e.message)}</p>`; }
+}
+let kgOverview = null;
+async function showGraph() {
+  if (kgLoaded) return;
+  try {
+    kgOverview = (await api("/api/graph/overview")).repos;
+    $("#kgStats").innerHTML = kgOverview.map(o => o.ok ? `<span class="chip"><b>${esc(o.repo)}</b> ${o.files} files · ${o.nodes} nodes · ${o.links} links · ${o.cross_repo} cross-repo</span>` : `<span class="chip warn">${esc(o.repo)}: ${esc(o.error)}</span>`).join("");
+    $("#kgTree").innerHTML = "<ul>" + kgOverview.filter(o => o.ok).map(o => `<li data-repo="${esc(o.repo)}" data-id="repo:${esc(o.repo)}" data-open="0"><div class="tn" data-has="1" data-sel="1"><span class="tw">▸</span><span class="k repok">repo</span><span class="tname"><b>${esc(o.repo)}</b></span></div></li>`).join("") + "</ul>";
+    kgLoaded = true;
+    for (const li of document.querySelectorAll("#kgTree > ul > li")) await kgExpand(li);
+  } catch (e) { $("#kgTree").innerHTML = `<p class="bad" style="padding:8px">${esc(e.message)}</p>`; }
+}
+$("#kgCollapse").onclick = () => document.querySelectorAll("#kgTree li[data-open='1']").forEach(li => { if (!li.dataset.id.startsWith("repo:")) kgExpand(li, false); });
+async function kgFind() {
+  const q = $("#kgFind").value.trim(); if (!q) { $("#kgFound").innerHTML = ""; return; }
+  const r = (await api("/api/graph/find?q=" + encodeURIComponent(q))).results;
+  $("#kgFound").innerHTML = r.length ? `<div class="card" style="margin:0 0 12px;max-height:220px;overflow:auto">${r.map(x => linkHtml(x, "")).join("")}</div>` : `<p class="small">Nothing named like “${esc(q)}”.</p>`;
+  document.querySelectorAll("#kgFound .lk").forEach(a => a.onclick = () => reveal(a.dataset.r, a.dataset.u));
+}
+$("#kgFindBtn").onclick = kgFind; $("#kgFind").onkeydown = (e) => { if (e.key === "Enter") kgFind(); };
+
+/* folder picker */
+let pickCb = null, pickPath = "";
+async function pick(cb, start) { pickCb = cb; await browse(start || pickPath || S.home); $("#picker").classList.add("open"); }
+async function browse(p) {
+  const d = await api("/api/fs?path=" + encodeURIComponent(p)); pickPath = d.path;
+  $("#pkPath").textContent = d.path; $("#pkUp").disabled = !d.parent; $("#pkUp").onclick = () => browse(d.parent);
+  $("#pkHint").textContent = d.git ? "This folder is a git repository." : (d.pickable === false ? "Choose a drive." : "");
+  $("#pkSelect").disabled = d.pickable === false;
+  $("#pkList").innerHTML = d.dirs.map(x => `<div class="dir" data-p="${esc(x.path)}">📁 ${esc(x.name)} ${x.git ? '<span class="badge">git</span>' : ""}</div>`).join("") || "<p class='small' style='padding:8px'>No sub-folders.</p>";
+  document.querySelectorAll(".dir").forEach(el => el.onclick = () => browse(el.dataset.p));
+}
+$("#pkCancel").onclick = () => $("#picker").classList.remove("open");
+$("#pkSelect").onclick = () => { $("#picker").classList.remove("open"); pickCb && pickCb(pickPath); };
+
+/* start */
+(async () => {
+  try { S = await api("/api/state"); } catch (e) { document.body.innerHTML = `<p style="padding:40px" class="bad">Can't reach the setup service (${esc(e.message)}). Re-open the address printed in the terminal.</p>`; return; }
+  $("#fw").textContent = S.framework;
+  repos = S.repos.slice(); fillRepoSelect();
+  if (S.deps_ok) done.add("install");
+  if (S.deps_ok && S.model_ok) done.add("model");
+  if (S.deps_ok && S.model_ok && S.graph_ready) ["repos","review","configure","verify"].forEach(k => done.add(k));
+  cur = !S.deps_ok ? "install" : !S.model_ok ? "model" : S.graph_ready ? "queries" : "repos";
+  showInstall(); nav(); go(cur);
+})();
+</script>
+</body>
+</html>

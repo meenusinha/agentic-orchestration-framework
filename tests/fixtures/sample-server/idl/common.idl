@@ -1,0 +1,4 @@
+module Common {
+  /** Every service can report its name. */
+  interface IService { string name(); };
+};
