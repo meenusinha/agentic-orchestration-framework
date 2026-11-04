@@ -248,15 +248,42 @@ def suggestions() -> list:
     return out[:30]
 
 
+_MODEL_CHECK: dict = {"key": None, "problem": None}
+
+
+def model_problem() -> str | None:
+    """None if every model file matches its pinned SHA-256, else what is wrong. The pins are
+    read from repo-agent/mcp/repo_rag.py (the one the servers use), never duplicated here.
+    Cached by file size and modification time, so the page stays fast."""
+    import hashlib
+    import re
+    src = (FW / "repo-agent" / "mcp" / "repo_rag.py").read_text(encoding="utf-8")
+    pins = dict(re.findall(r'"([\w./]+\.(?:json|safetensors))":\s+"([0-9a-f]{64})"', src))
+    if not pins:
+        return "the pinned fingerprints could not be read"
+    missing = [f for f in pins if not (MODEL_DIR / f).is_file()]
+    if missing:
+        return "missing " + ", ".join(missing)
+    key = tuple((f, (MODEL_DIR / f).stat().st_size, (MODEL_DIR / f).stat().st_mtime_ns) for f in sorted(pins))
+    if _MODEL_CHECK["key"] != key:
+        def digest(path: Path) -> str:      # JSON: line endings normalised, as in the servers
+            data = path.read_bytes()
+            return hashlib.sha256(data.replace(b"\r\n", b"\n") if path.suffix == ".json" else data).hexdigest()
+        changed = [f for f, h in pins.items() if digest(MODEL_DIR / f) != h]
+        _MODEL_CHECK.update(key=key, problem=(", ".join(changed) + " changed (SHA-256 differs)") if changed else None)
+    return _MODEL_CHECK["problem"]
+
+
 def state() -> dict:
     ok = deps_ok()
+    problem = model_problem()
     copies = []
-    if ok and not (MODEL_DIR / "model.safetensors").exists():
+    if ok and problem is not None:
         r = subprocess.run([sys.executable, str(SCRIPTS / "configure.py"), "--framework", str(FW), "--find-model"],
                            capture_output=True, text=True)
         copies = [l.strip() for l in r.stdout.splitlines() if l.startswith("  /") or l.startswith("  ~")]
     return {"framework": str(FW), "python": sys.executable, "in_venv": sys.prefix != sys.base_prefix,
-            "deps_ok": ok, "model_ok": (MODEL_DIR / "model.safetensors").exists(), "model_dir": str(MODEL_DIR),
+            "deps_ok": ok, "model_ok": problem is None, "model_problem": problem, "model_dir": str(MODEL_DIR),
             "model_copies": copies, "repos": configured_repos(), "suggestions": suggestions(),
             "graph_ready": graph_ready(), "results_dir": str(RESULTS),
             "home": str(Path.home()), "samples": gitclone.SAMPLE_REPOS, "git": gitclone.available()}

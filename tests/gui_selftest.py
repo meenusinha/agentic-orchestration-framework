@@ -7,7 +7,10 @@ sample repos → scan → configure → create the GraphRAG → queries. It also
 security guards and that every query result is saved under a new name.
 
 Usage (any Python 3.11+, no venv needed — the GUI makes its own):
-  python tests/gui_selftest.py --model-from <folder holding the model> [--dir <folder for the test repos>]
+  python tests/gui_selftest.py [--model-from <folder holding the model>] [--dir <folder for the test repos>]
+
+Without --model-from, the model bundled in models/ is used: it is moved aside while the
+test runs (the model step is tested from an empty folder) and always restored afterwards.
 
 The two sample repositories are built locally from tests/fixtures/ as git repositories
 (branch main; the client also gets a policy-hint branch) and cloned through the GUI from
@@ -127,11 +130,34 @@ def start_gui(env):
 
 def main():
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
-    ap.add_argument("--model-from", required=True, help="folder holding the approved embedding model")
+    ap.add_argument("--model-from", help="folder holding the approved embedding model "
+                                         "(default: the model bundled in models/)")
     ap.add_argument("--dir", help="folder to clone the test repos into (default: a temp folder)")
     ap.add_argument("--server-url", help="git URL of the server test repo (default: built from tests/fixtures)")
     ap.add_argument("--client-url", help="git URL of the client test repo (default: built from tests/fixtures)")
     a = ap.parse_args()
+    # The model step is tested from an empty models/ folder: the bundled model is moved aside
+    # for the duration of the test, used as the copy source, and always put back afterwards.
+    import shutil
+    bundled = FW / "models" / "granite-embedding-small-english-r2"
+    backup = None
+    if (bundled / "model.safetensors").exists():
+        backup = Path(tempfile.mkdtemp(prefix="ao-bundled-model-")) / "model"
+        shutil.move(str(bundled), str(backup))
+        bundled.mkdir()
+        a.model_from = a.model_from or str(backup)
+    if not a.model_from:
+        sys.exit("ERROR: no bundled model in models/ — pass --model-from <folder holding the model>")
+    try:
+        _run(a)
+    finally:
+        if backup is not None:                   # restore the bundled model exactly as it was
+            shutil.rmtree(bundled, ignore_errors=True)
+            shutil.move(str(backup), str(bundled))
+            print(f"   (bundled model restored in {bundled})", flush=True)
+
+
+def _run(a):
     pg_dir = Path(a.dir) if a.dir else Path(tempfile.mkdtemp(prefix="ao-selftest-"))
     pg_dir.mkdir(parents=True, exist_ok=True)
     if not (a.server_url and a.client_url):

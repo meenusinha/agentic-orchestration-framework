@@ -29,4 +29,6 @@ First release for VS Code with GitHub Copilot, on Windows and Linux, under the A
   across repositories.
 - **Security controls**: offline operation, approved model only, secret exclusion and
   redaction, private storage, untrusted-content framing, dependency audit (`tests/run_all.py`).
+- **Bundled embedding model** (`models/`, Apache 2.0, unmodified, every file hash-pinned):
+  works right after cloning, nothing to download.
 - **Documentation**: architecture, security considerations, security evidence.

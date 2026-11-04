@@ -70,14 +70,14 @@ around it, and the measurements that back those claims up.
 | Model | `ibm-granite/granite-embedding-small-english-r2` (IBM), Apache-2.0 |
 | Training data | Permissively licensed data plus IBM internal/synthetic data; datasets with non-commercial licenses deliberately excluded (model card) |
 | Pinned revision | `2ab6fa8ea2d674564defd37171ae19079b864b33` |
-| Integrity | **Hash-pinned: all 8 files** must match their recorded SHA-256 (table below) — checked when copied **and at every start**; any missing or changed file is refused by name |
+| Integrity | **Hash-pinned: all 8 files** must match their recorded SHA-256 (table below) — checked during setup **and at every start**; any missing or changed file is refused by name |
 | Files present | `model.safetensors` (95.3 MB), `config.json`, `modules.json`, `sentence_bert_config.json`, `special_tokens_map.json`, `tokenizer.json`, `tokenizer_config.json`, `1_Pooling/config.json` — **no code, no pickle** |
 | Architecture | `ModernBertModel` (supported natively by `transformers`); `auto_map`: **none** → no remote code can be requested |
 | Modules | `sentence_transformers.models.Transformer`, `sentence_transformers.models.Pooling` (built-in) |
 | Reported CVEs | **0** for this model (checked 2026-11-01) |
 | Configuration | `config.json` contains no key that can request code (`auto_map`, `_attn_implementation*`, custom pipelines): checked 2026-11-01 |
 | What it outputs | Vectors, never text — it cannot reproduce or leak code |
-| Distribution | The setup GUI only copies a folder you point to; it never downloads. Keep the approved folder in a location you trust |
+| Distribution | **Included in the repository** (`models/`), unmodified; nothing is downloaded. Git is configured never to alter the files (`.gitattributes`: no line-ending conversion, no filters) |
 
 #### Hash-pinning: what it is and what is pinned
 
@@ -224,7 +224,7 @@ ls -ld <repo>/.rag_index results ~/.agentic-orchestration/logs     # drwx------
 ls -l  <repo>/.rag_index results                                   # -rw-------
 
 # 6. End-to-end
-python3 tests/gui_selftest.py --model-from <model folder>         # 54 checks
+python3 tests/run_all.py                                          # all checks
 ```
 
 Windows (PowerShell):
@@ -250,7 +250,7 @@ Get-ChildItem -Recurse -Include *.py repo-agent,orchestrator,gui,skills,setup_gu
 icacls <repo>\.rag_index; icacls results
 
 # 6. End-to-end
-py tests\gui_selftest.py --model-from <model folder>
+py tests\run_all.py
 ```
 
 ---

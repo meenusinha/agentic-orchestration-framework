@@ -1,2 +1,4 @@
-models/**/*.bin filter=lfs diff=lfs merge=lfs -text
-models/**/*.safetensors filter=lfs diff=lfs merge=lfs -text
+# The bundled embedding model is stored in plain Git (no LFS), so every clone contains it.
+# Its files are hash-pinned: never convert line endings or apply any filter to them.
+models/** -text
+*.safetensors binary

@@ -41,7 +41,7 @@ Applies to this repository (VS Code + GitHub Copilot; supported platforms Window
 | Step | Network? | Destination | How to keep it under your control |
 |---|---|---|---|
 | Install packages | Yes | PyPI (or your mirror) | Set `PIP_INDEX_URL` / `pip.conf` to a mirror you trust; the hashes in `requirements.lock` still have to match |
-| Get the embedding model | No (GUI) | — | The GUI only copies a folder you point to. Keep the approved model in a location you trust |
+| Get the embedding model | **No** | — | Included in the repository (`models/`), every file hash-pinned |
 | Clone repos in the GUI | Yes | The URL you enter | Use Git servers you trust; or clone yourself and add the folder |
 | Scan, configure, build the graph, queries, knowledge-graph view | **No** | — | — |
 | AI assistant answers | Yes | Your AI provider | Governed by the provider agreement and your editor's policies |
@@ -79,7 +79,7 @@ Applies to this repository (VS Code + GitHub Copilot; supported platforms Window
 - Only the approved model is accepted: `ibm-granite/granite-embedding-small-english-r2`
   (Apache 2.0; permissively licensed training data), pinned to revision `2ab6fa8e…`.
 - **Hash-pinned:** all eight model files (weights, settings, tokenizer) must match their recorded
-  SHA-256 fingerprints. The check runs when the model is copied **and at every server start**;
+  SHA-256 fingerprints. The check runs during setup **and at every server start**;
   a missing or changed file is refused by name. (The fingerprints are listed in
   [security-evidence.md](security-evidence.md#23-embedding-model).)
 - A model folder is refused if it contains code or pickle files (`.py`, `.pyc`, `.bin`, `.pt`,
@@ -174,14 +174,14 @@ The page runs only while the setup GUI is open, and **Close** stops it.
 | # | Control | Status |
 |---|---|---|
 | 1 | All dependencies pinned with SHA-256 hashes; `sentence-transformers` ≥ 6.0 | In place — 6.2.0; installation fails on any hash mismatch |
-| 2 | Model weights only as `safetensors`; all 8 model files hash-pinned (SHA-256) | In place — checked when copied and at every start |
+| 2 | Model weights only as `safetensors`; all 8 model files hash-pinned (SHA-256) | In place — checked during setup and at every start |
 | 3 | Model folders with code or pickle files, or non-standard module types, are refused | In place |
 | 4 | `trust_remote_code=False`; no pickle loaded anywhere | In place |
 | 5 | Model hub access and telemetry disabled before any ML library loads | In place |
 | 6 | No database server: a local SQLite graph, vectors as raw float32 bytes | In place |
 | 7 | Index, reports and logs private (`0700`/`0600`), atomic writes, index git-ignored | In place; disk encryption and backup exclusion are operational (§4) |
 | 8 | Known-vulnerability audit of the locked dependencies | In place — `tests/run_all.py`, on every change and weekly |
-| 9 | Approved model distributed from a location you trust | Supported — the setup page copies from the folder you point to and never downloads |
+| 9 | Approved model included in the repository, unmodified, never downloaded | In place — `models/`; Git never alters the files (`.gitattributes`) |
 | 10 | Repository code never executed; build files read as text | In place |
 
 ---
@@ -219,10 +219,10 @@ ls -ld <repo>/.rag_index results          # drwx------
 ls -l  <repo>/.rag_index results          # -rw-------
 
 # All checks: end-to-end test, dependency audit, MCP smoke test
-python3 tests/run_all.py --model-from <folder holding the model>
+python3 tests/run_all.py
 
 # End-to-end test only
-python3 tests/gui_selftest.py --model-from <folder holding the model>
+python3 tests/gui_selftest.py
 ```
 
 Windows (PowerShell):
@@ -237,7 +237,7 @@ Get-FileHash -Algorithm SHA256 models\granite-embedding-small-english-r2\model.s
 icacls <repo>\.rag_index
 icacls results
 
-py tests\gui_selftest.py --model-from <folder holding the model>
+py tests\run_all.py
 ```
 
 To measure that nothing leaves the machine, use the audit-hook method in

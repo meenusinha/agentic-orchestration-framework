@@ -96,23 +96,14 @@ code out of the results.
 
 The index needs the approved embedding model,
 `ibm-granite/granite-embedding-small-english-r2` (pinned revision and weights hash), in
-`<framework>/models/granite-embedding-small-english-r2/`. If it's already there, skip
-this step. Otherwise, see what's already on the machine:
+`<framework>/models/granite-embedding-small-english-r2/`. **It is included in the framework
+repository**, so normally there is nothing to do. Every file is hash-pinned and checked
+automatically.
 
-```bash
-~/agentic-orchestration/.venv/bin/python <this-skill>/scripts/configure.py \
-    --framework ~/agentic-orchestration --find-model
-```
-
-Then **ask the developer** where their copy of the approved model is — for example an
-internal model or artifact store, or a shared drive. Mention any copies
-the command found.
-
-Use `--model-from <path>` in the next step. The script checks the weights' SHA-256
-against the approved one and copies only the needed safetensors and JSON files, never
-code or pickle files. Any other model is refused. The framework never downloads a
-model: if the model is missing and no `--model-from` is given, `configure.py` stops
-before changing anything and lists the copies it found.
+Only if that folder is missing or a file was changed (the scripts say which), restore it
+with `git checkout -- models/` in the framework folder, or ask the developer for another
+copy of the approved model and pass it with `--model-from <path>` in the next step; any
+other model is refused. The framework never downloads a model.
 
 ## 5. Configure every repo in one command
 
@@ -121,7 +112,7 @@ Keep the quotes the scan printed, so the shell doesn't expand globs.
 
 ```bash
 ~/agentic-orchestration/.venv/bin/python <this-skill>/scripts/configure.py \
-    --framework ~/agentic-orchestration --model-from <path-from-step-4> \
+    --framework ~/agentic-orchestration \
     --repo interfaces=/abs/path/to/interfaces --src interfaces=. \
     --repo server=/abs/path/to/server --src server=. \
       --role 'server=third_party/**:external:signatures' \
@@ -131,9 +122,8 @@ Keep the quotes the scan printed, so the shell doesn't expand globs.
 
 The script:
 
-- refuses to start while any repo has unclassified file types, or the model is missing
-  without `--model-from`
-- copies the embedding model if it's missing
+- refuses to start while any repo has unclassified file types, or while the model is
+  missing or changed (unless `--model-from` points to a valid copy)
 - adds the repos to `orchestrator/mcp/config.yaml`
 - copies the repo agent (`mcp/`, including its `codegraph/` package) and `knowledge/`
   into each repo, and writes `repo_name`, the paths, `file_types` and `structure` into

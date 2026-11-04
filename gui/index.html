@@ -138,7 +138,7 @@ details summary{cursor:pointer;color:var(--muted);font-size:12.5px;padding:2px 0
 
     <section data-step="model">
       <h2>2. Embedding model</h2>
-      <p class="sub">Point to your copy of the approved model <code>ibm-granite/granite-embedding-small-english-r2</code> (Apache 2.0, ~95&nbsp;MB). It is copied into the framework and checked against its pinned SHA-256 — nothing is downloaded.</p>
+      <p class="sub">The approved model <code>ibm-granite/granite-embedding-small-english-r2</code> (Apache 2.0, ~95&nbsp;MB) is included in the framework's <code>models/</code> folder. Every file is checked against its pinned SHA-256 fingerprint. Only if it is missing do you need to point to another copy — nothing is ever downloaded.</p>
       <div id="modelStatus"></div>
       <div id="modelChoices"></div>
       <div class="log" id="modelLog"></div>
@@ -277,11 +277,11 @@ $("#installNext").onclick = () => finish("install","model");
 /* 2 model */
 function showModel() {
   if (S.model_ok) {
-    $("#modelStatus").innerHTML = status(true, "Model ready in <code>"+esc(S.model_dir)+"</code>");
+    $("#modelStatus").innerHTML = status(true, "Model ready and verified (all files match their fingerprints): <code>"+esc(S.model_dir)+"</code>");
     $("#modelChoices").innerHTML = `<button class="primary" id="modelNext">Continue</button>`;
     $("#modelNext").onclick = () => finish("model","repos"); return;
   }
-  $("#modelStatus").innerHTML = status(false, "The model is not copied yet.");
+  $("#modelStatus").innerHTML = status(false, "The model is not usable: " + esc(S.model_problem || "missing") + ". Restore it with <code>git checkout -- models/</code> in the framework folder, or point to another copy of the approved model.");
   const copies = (S.model_copies||[]).map(c => `<div class="cmd"><code>${esc(c)}</code><button data-copy="${esc(c)}">Use this copy</button></div>`).join("");
   $("#modelChoices").innerHTML = `
     ${copies ? `<h3 style="font-size:14px;margin:8px 0">Copies found on this computer</h3>${copies}` : ""}

@@ -73,7 +73,7 @@ You can also run the same searches yourself in a local web page, without Copilot
 |---|---|
 | Python 3.11 or newer | On **Windows or Linux** — the supported platforms |
 | VS Code with GitHub Copilot | Copilot Chat in **Agent** mode, with MCP servers allowed in your VS Code settings |
-| The approved embedding model | `ibm-granite/granite-embedding-small-english-r2`, revision `2ab6fa8ea2d674564defd37171ae19079b864b33`. Keep the approved folder in a location you trust (for example an artifact store or a shared drive). It must contain `model.safetensors` and the model's JSON files |
+| The embedding model | **Included** in `models/` (`ibm-granite/granite-embedding-small-english-r2`, revision `2ab6fa8ea2d674564defd37171ae19079b864b33`, Apache 2.0); every file is hash-pinned. Nothing to download |
 | Git | Only for cloning repositories from the setup page; you can also add folders you've already cloned |
 | Access to a Python package index | Only during installation. You can point pip at a package mirror (`PIP_INDEX_URL` or `pip.conf`) |
 
@@ -95,7 +95,7 @@ browser. It runs on `127.0.0.1` only and is protected by a one-time token. Six s
 | Step | What you do |
 |---|---|
 | **1. Install** | Click **Install**. The hash-locked packages go into `.venv`; nothing is installed into your system Python |
-| **2. Model** | Point to the folder that holds the model and click **Copy model**. Every file is checked against its pinned fingerprint (see [Model integrity](#model-integrity-hash-pinning)); nothing is downloaded |
+| **2. Model** | Nothing to do: the included model is checked file by file against its pinned fingerprints (see [Model integrity](#model-integrity-hash-pinning)) and the step completes by itself. Only if `models/` is missing does it ask you to point to another copy |
 | **3. Repositories** | Add each repository to connect, at least two. Either **Choose folder…** for a repository you've already cloned, or **Clone from Git**: enter the URL and branch and choose the folder to clone into. If that folder already holds a clone of the same repository, it's updated and switched to the branch instead |
 | **4. Review** | Check what the scan found: languages, processes and libraries, IDL interfaces and the role of each folder. If a file type is unknown, say what it contains (implementation, interface, configuration, …) and which language to read it as |
 | **5. Configure** | Click **Configure**. This writes the VS Code configuration into each repository (see [Files the framework adds](#files-the-framework-adds-to-your-repositories)) |
@@ -199,7 +199,6 @@ the framework's virtual-environment Python (`.venv/bin/python`; on Windows
 
 # Configure them (one --repo per repository; answers for unknown types and roles as flags)
 .venv/bin/python skills/cross-repo-feature-analysis/scripts/configure.py --framework . \
-    --model-from /path/to/model-folder \
     --repo repo-a=/path/to/repo-a --src repo-a=. \
     --repo repo-b=/path/to/repo-b --src repo-b=. \
     --file-type 'repo-b=.xidl:interface:idl' --role 'repo-a=third_party/**:external:signatures'
@@ -216,7 +215,7 @@ One command runs every check: an end-to-end test of the setup page, a vulnerabil
 audit of the locked dependencies, and a test of the MCP servers as VS Code starts them.
 
 ```bash
-python3 tests/run_all.py --model-from /path/to/model-folder        # Windows: py tests\run_all.py …
+python3 tests/run_all.py          # Windows: py tests\run_all.py
 ```
 
 The tests build two small sample repositories locally from `tests/fixtures/`; they don't
@@ -245,7 +244,7 @@ byte of the file. Changing even one byte gives a completely different value.
 code. The embedding model consists of eight files: the weights, the model and pipeline
 settings, and the tokenizer. All eight are pinned. Each file is recalculated and compared:
 
-- when the model is copied in step 2 of the setup, and
+- when the setup checks the model (step 2), and
 - every time an MCP server starts.
 
 If any file is missing or differs — corrupted, replaced or edited — the model is refused and
@@ -279,7 +278,7 @@ For details:
 | Copilot answers without using the tools | Use **Agent** mode and start the request with `/cross-repo-feature-analysis`, or choose a stronger model |
 | Servers stopped after re-configuring | Reload the VS Code window |
 | `ModuleNotFoundError` in the MCP server output | The configuration points at the wrong Python: run **Configure** again from the setup page |
-| `Refusing to load …` / model not found | The model folder is missing, incomplete or not the approved model: repeat step 2 with the correct folder |
+| `Refusing to load …` / model not found | A model file is missing or changed. Restore the included model with `git checkout -- models/`, or point step 2 to another copy of the approved model |
 | "already exists and is not a git clone" when cloning | Choose another folder or folder name; existing folders are never overwritten |
 | Cloning a private repository fails | Set up Git access first (SSH key or credential manager); the setup page never asks for passwords |
 | A repository returns nothing relevant | In **Review**, check for unknown file types set to *ignore* and for folders with the wrong role |

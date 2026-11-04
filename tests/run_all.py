@@ -8,8 +8,9 @@
   3. MCP smoke test (tests/smoke_test.py): starts the generated MCP servers as VS Code would.
 
 Usage:
-  python tests/run_all.py --model-from <folder holding the approved embedding model>
-  python tests/run_all.py --model-from <folder> --skip-audit     # e.g. without access to an advisory database
+  python tests/run_all.py                        # uses the model bundled in models/
+  python tests/run_all.py --model-from <folder>  # or a copy of the approved model from elsewhere
+  python tests/run_all.py --skip-audit           # e.g. without access to an advisory database
 
 Exit code 0 = every check passed. Run it on every change and on a schedule (for example
 weekly), so new advisories for unchanged pins are noticed.
@@ -37,15 +38,15 @@ def step(title, cmd) -> bool:
 
 def main():
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
-    ap.add_argument("--model-from", required=True, help="folder holding the approved embedding model")
+    ap.add_argument("--model-from", help="folder holding the approved embedding model (default: the bundled one)")
     ap.add_argument("--skip-audit", action="store_true", help="skip the dependency vulnerability audit")
     a = ap.parse_args()
     work = Path(tempfile.mkdtemp(prefix="ao-checks-"))
     py = FW / ".venv" / ("Scripts/python.exe" if os.name == "nt" else "bin/python")
     results = {}
     results["end-to-end"] = step("End-to-end test of the setup page",
-                                 [sys.executable, FW / "tests" / "gui_selftest.py",
-                                  "--model-from", a.model_from, "--dir", work / "repos"])
+                                 [sys.executable, FW / "tests" / "gui_selftest.py", "--dir", work / "repos",
+                                  *(["--model-from", a.model_from] if a.model_from else [])])
     if not a.skip_audit:
         ok = step("Install the audit tool", [py, "-m", "pip", "install", "-q", "pip-audit"])
         results["dependency audit"] = ok and step(

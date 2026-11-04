@@ -2,7 +2,4 @@
 __pycache__/
 *.pyc
 .rag_index/
-# embedding model files (fetched by setup, never committed)
-models/*/*
-!models/*/.gitkeep
 results/
