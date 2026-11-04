@@ -149,12 +149,17 @@ class GraphSearch:
     def _ref(self, dst: str, name: str, conf: float) -> dict:
         if dst.startswith("@"):
             repo, _, uid = dst[1:].partition(":")
-            return {"name": name, "repo": repo, "remote": True, "confidence": conf,
-                    "kind": "op" if name.count("::") >= 2 or (name.count("::") == 1 and name.split("::")[-1][:1].islower())
-                    else "interface"}
+            out = {"name": name, "repo": repo, "remote": True, "confidence": conf,
+                   "kind": "op" if name.count("::") >= 2 or (name.count("::") == 1 and name.split("::")[-1][:1].islower())
+                   else "interface"}
+            pn = self._node_any(repo, uid)                 # every unit is reported with its file
+            if pn:
+                out.update(file=pn["file"], line=pn["start_line"])
+            return out
         n = self.s.node(dst) if dst else None
-        if n is None:
-            return {"name": name, "resolved": False, "confidence": conf}
+        if n is None:                                      # e.g. an external library call: no unit, no file
+            return {"name": name, "resolved": False, "file": None, "note": "not in the indexed code",
+                    "confidence": conf}
         return {"name": n["qualname"], "file": n["file"], "line": n["start_line"], "kind": n["kind"],
                 "confidence": conf}
 
@@ -336,7 +341,8 @@ class GraphSearch:
                 continue
             if ctx.get("parent"):
                 if ctx["parent"]["qualname"] in seen_parents:
-                    ctx["parent"] = {"qualname": ctx["parent"]["qualname"], "skeleton": "(shown above)"}
+                    ctx["parent"] = {"qualname": ctx["parent"]["qualname"], "kind": ctx["parent"].get("kind", ""),
+                                     "file": ctx["parent"].get("file"), "skeleton": "(shown above)"}
                 seen_parents.add(ctx["parent"]["qualname"])
             ctx["score"] = round(score, 4)
             result.append(ctx)

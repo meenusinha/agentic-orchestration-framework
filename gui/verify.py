@@ -88,7 +88,7 @@ def main():
             if l["interface"] in imap:
                 imap[l["interface"]]["providers"].append(
                     {"repo": r["name"], "process": l.get("target") or "-", "by": l["qualname"],
-                     "confidence": l["confidence"]})
+                     "file": l.get("file"), "confidence": l["confidence"]})
         seen = set()
         for l in reg.get("links", {}).get("consumes", []):
             k = (l["interface"], l["qualname"])
@@ -96,7 +96,7 @@ def main():
                 seen.add(k)
                 imap[l["interface"]]["consumers"].append(
                     {"repo": r["name"], "process": l.get("target") or "-", "by": l["qualname"],
-                     "operation": l.get("op"), "confidence": l["confidence"]})
+                     "file": l.get("file"), "operation": l.get("op"), "confidence": l["confidence"]})
     emit(event="result", ok=True, repos=out, interfaces=list(imap.values()))
 
 

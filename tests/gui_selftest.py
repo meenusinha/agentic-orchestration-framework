@@ -59,6 +59,25 @@ FW = Path(__file__).resolve().parent.parent
 RESULTS = []
 
 
+def units_without_file(obj, path="", out=None):
+    """Every entry that names a code unit must say which file it is in (or be marked as
+    outside the indexed code). Returns the offending paths."""
+    out = [] if out is None else out
+    if isinstance(obj, dict):
+        names_unit = any(k in obj for k in ("qualname", "caller", "test", "server_class")) or \
+            ("name" in obj and any(k in obj for k in ("line", "kind", "remote", "resolved")))
+        if names_unit and not obj.get("file") and obj.get("note") != "not in the indexed code" \
+                and obj.get("kind") != "interface":
+            out.append(f"{path} {sorted(obj)[:6]}")
+        for k, v in obj.items():
+            units_without_file(v, f"{path}.{k}", out)
+    elif isinstance(obj, list):
+        for v in obj:
+            units_without_file(v, path + "[]", out)
+    return out
+
+
+
 def check(name, ok, detail=""):
     RESULTS.append((name, bool(ok)))
     print(f"   {'PASS' if ok else 'FAIL'}  {name}" + (f"  — {detail}" if detail else ""), flush=True)
@@ -377,6 +396,9 @@ def _run(a):
         check("saved results listed", n >= 4, f"{n} files in {h.get('dir')}")
         code, m = g.call("/api/result?name=" + urllib.request.quote(h["results"][0]["name"]))
         check("a saved result can be reopened", code == 200 and m.get("markdown", "").startswith("# "))
+        gaps = units_without_file(r.get("result"), "search") + units_without_file(t.get("result"), "trace") + \
+            units_without_file(im.get("result"), "impact")
+        check("every unit in every query result carries its file name", not gaps, "; ".join(gaps[:3]))
         check("path traversal refused", g.call("/api/result?name=..%2Fsetup_gui.py")[0] == 404)
         if os.name != "nt":                      # Windows uses ACLs, not mode bits
             rp = Path(r["saved"])
@@ -410,6 +432,10 @@ def _run(a):
         code, od = g.call(f"/api/graph/node?repo={op['repo']}&uid={op['uid']}") if op else (0, {})
         xr = {x["repo"] for v in od.get("links_in", {}).values() for x in v}
         check("IDL operation shows its callers in the other repo", "sample-client" in xr, ", ".join(od.get("links_in", {})))
+        link_gaps = [f"{k}: {x.get('qualname') or x.get('name')}" for links in (d.get("links_out", {}), od.get("links_in", {}))
+                     for k, v in links.items() for x in v if not x.get("file") and not x.get("missing")]
+        check("knowledge graph: node details and every link carry a file name",
+              d.get("file") and od.get("file") and not link_gaps, "; ".join(link_gaps[:3]))
         check("graph API refuses bad ids and unknown repos",
               g.call("/api/graph/children?repo=sample-server&node=" + q("x' OR 1=1 --"))[0] == 404 and
               g.call("/api/graph/children?repo=nope&node=")[0] == 404)

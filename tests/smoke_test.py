@@ -64,6 +64,24 @@ async def call(server, tool, args):
     return out
 
 
+def units_without_file(obj, path="", out=None):
+    """Every entry that names a code unit must say which file it is in (or be marked as
+    outside the indexed code). Returns the offending paths."""
+    out = [] if out is None else out
+    if isinstance(obj, dict):
+        names_unit = any(k in obj for k in ("qualname", "caller", "test", "server_class")) or \
+            ("name" in obj and any(k in obj for k in ("line", "kind", "remote", "resolved")))
+        if names_unit and not obj.get("file") and obj.get("note") != "not in the indexed code" \
+                and obj.get("kind") != "interface":
+            out.append(f"{path} {sorted(obj)[:6]}")
+        for k, v in obj.items():
+            units_without_file(v, f"{path}.{k}", out)
+    elif isinstance(obj, list):
+        for v in obj:
+            units_without_file(v, path + "[]", out)
+    return out
+
+
 CHECKS = []
 
 
@@ -107,6 +125,28 @@ async def main():
     blob = json.dumps(q)
     check("fake secrets are redacted", "Sample-Fake-Pass" not in blob and "SampleFakeKey" not in blob,
           f"{blob.count('[REDACTED]')} × [REDACTED]")
+
+    # every unit returned by any tool carries its file name
+    gaps = []
+    outs = {"search_code": await call("sample-server", "search_code", {"query": "password policy strength", "k": 5}),
+            "trace_interface": await call("sample-client", "trace_interface", {"name": "IPasswordService"}),
+            "impact_of": await call("sample-server", "impact_of", {"symbol": "pwd_policy_check"}),
+            "find_references": await call("sample-server", "find_references", {"symbol": "checkStrength"})}
+    first = outs["search_code"]["results"][0]["node"]["id"]
+    outs["get_node"] = await call("sample-server", "get_node", {"node_id": first})
+    parent = (outs["search_code"]["results"][0].get("parent") or {}).get("id") or first
+    outs["get_children"] = await call("sample-server", "get_children", {"node_id": parent})
+    for name, out in outs.items():
+        gaps += units_without_file(out, name)
+    check("every unit in every tool result carries its file name", not gaps, "; ".join(gaps[:3]) or
+          f"{len(outs)} tools checked")
+    txt = await call("sample-server", "query_repo",
+                     {"feature_request": "checkStrength servant implementation calls pwd_policy_check"})
+    heads = [l for l in txt.splitlines() if l.startswith("### ")]
+    rels = [l for l in txt.splitlines() if l.split(":")[0] in ("calls", "called by", "tested by", "implements", "calls operation")]
+    bad = [l for l in heads if "(" not in l] + [l for l in rels if any("(" not in x for x in l.split(": ", 1)[1].split(", "))]
+    check("query_repo text gives the file for every unit and related unit", heads and rels and not bad,
+          f"{len(heads)} units, {len(rels)} relation lines" if not bad else bad[0][:80])
 
     rr = await call("orchestrator_router", "get_relevant_repos",
                     {"requesting_repo": "sample-client", "feature_description": "show the policy hint in the login meter"})

@@ -104,6 +104,7 @@ details summary{cursor:pointer;color:var(--muted);font-size:12.5px;padding:2px 0
 .kgd h3{margin:0 0 4px;font-size:16px;word-break:break-all}.lk{display:block;padding:3px 0;font-size:12.5px;cursor:pointer;color:var(--accent)}
 .lk:hover{text-decoration:underline}.lk .r{color:var(--muted)}#kgFound .lk{font-weight:400}.lk.xr{font-weight:600}
 .lgroup{margin:12px 0;padding-top:10px;border-top:1px solid var(--line2)}.lgroup b{font-size:11.5px;color:var(--muted);text-transform:uppercase;letter-spacing:.04em}
+.fp{font:11.5px ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;color:var(--muted)}
 .hist{display:flex;justify-content:space-between;align-items:center;gap:10px;padding:9px 4px;border-bottom:1px solid var(--line2);font-size:13px}
 .hist:last-child{border-bottom:0}.hist:hover{background:var(--soft)}
 </style>
@@ -432,8 +433,8 @@ $("#verifyBtn").onclick = async () => {
     const rows = res.repos.map(r => `<tr><td><b>${esc(r.name)}</b></td><td>${r.files}</td><td>${r.units}</td><td>${r.links}</td>
       <td>${r.interfaces_defined.map(esc).join(", ") || "—"}</td><td>${r.unclassified.length ? `<span class="warn">${r.unclassified.map(esc).join(", ")}</span>` : "—"}</td></tr>`).join("");
     const ifs = res.interfaces.map(i => `<div class="iface"><b>${esc(i.interface)}</b> <span class="small">defined in ${esc(i.defined_in)} · ${i.operations.map(esc).join(", ")}</span>
-      <div class="small">served by: ${i.providers.map(p => `${esc(p.repo)} / process ${esc(p.process)} (${esc(p.by)})`).join("; ") || "<span class='warn'>no provider found</span>"}</div>
-      <div class="small">called by: ${i.consumers.map(c => `${esc(c.repo)} / process ${esc(c.process)} (${esc(c.by)}${c.confidence < 0.8 ? ", confidence " + c.confidence : ""})`).join("; ") || "<span class='warn'>no caller found</span>"}</div></div>`).join("");
+      <div class="small">served by: ${i.providers.map(p => `${esc(p.repo)} / process ${esc(p.process)} — ${where(p.by, p.file)}`).join("; ") || "<span class='warn'>no provider found</span>"}</div>
+      <div class="small">called by: ${i.consumers.map(c => `${esc(c.repo)} / process ${esc(c.process)} — ${where(c.by, c.file)}${c.confidence < 0.8 ? " (confidence " + c.confidence + ")" : ""}`).join("; ") || "<span class='warn'>no caller found</span>"}</div></div>`).join("");
     const first = res.repos[res.repos.length - 1]?.path || "";
     const cmd = (t) => `<div class="cmd"><code>${esc(t)}</code><button data-c="${esc(t)}">Copy</button></div>`;
     $("#verifyResult").innerHTML = `<div class="status"><b class="ok">✓</b>GraphRAG created — all repositories indexed and connected. Ask a question with the query field at the top.</div>
@@ -476,12 +477,16 @@ $("#qbar").onsubmit = async (ev) => {
   $("#qrun").disabled = false;
 };
 const pre = (t) => `<pre class="src">${esc(t)}</pre>`;
+/* every unit is shown with its file: name (file:line); units outside the index say so */
+const where = (name, file, line, repo) => `<code>${esc(name)}</code> ` + (file
+  ? `<span class="fp">${repo ? esc(repo) + ":" : ""}${esc(file)}${line ? ":" + line : ""}</span>`
+  : `<span class="fp">(not in the indexed code)</span>`);
 function unitHtml(n, parent, rel) {
   const r = Object.entries(rel||{}).filter(([k]) => ["calls_operation","implements","tested_by","called_by","calls"].includes(k))
-    .map(([k,v]) => `<div class="small"><b>${esc(k.replace(/_/g," "))}:</b> ${v.slice(0,8).map(x => esc(x.name||x.qualname)).join(", ")}</div>`).join("");
+    .map(([k,v]) => `<div class="small"><b>${esc(k.replace(/_/g," "))}:</b> ${v.slice(0,8).map(x => where(x.name||x.qualname, x.file, x.line, x.repo)).join(", ")}</div>`).join("");
   return `<div class="unit"><div class="h">${esc(n.kind)} <code>${esc(n.qualname)}</code> ${n.id && n.repo ? `<button class="link small" data-graph="${esc(n.repo)}|${esc(n.id)}">show in graph</button>` : ""}</div>
     <div class="small">${esc(n.file)}:${n.lines[0]}–${n.lines[1]}${n.process ? " · process <b>"+esc(n.process)+"</b>" : ""} · ${esc(n.role)}${n.ifdef ? " · #if "+esc(n.ifdef) : ""}</div>
-    ${parent && parent.skeleton && parent.skeleton !== "(shown above)" ? `<details><summary>in ${esc(parent.kind||"")} ${esc(parent.qualname)}</summary>${pre(parent.skeleton)}</details>` : ""}
+    ${parent && parent.skeleton && parent.skeleton !== "(shown above)" ? `<details><summary>in ${esc(parent.kind||"")} ${where(parent.qualname, parent.file)}</summary>${pre(parent.skeleton)}</details>` : ""}
     ${pre(n.text)}${r}</div>`;
 }
 function traceHtml(t) {
@@ -489,27 +494,27 @@ function traceHtml(t) {
   const d = t.defined_in;
   return `<div class="iface"><b>${esc(t.interface)}</b> <span class="small">defined in ${esc(d.repo)} · ${esc(d.file)}:${d.lines[0]}–${d.lines[1]}</span>
     ${t.definition_text ? `<details><summary>IDL definition</summary>${pre(t.definition_text)}</details>` : ""}
-    ${(t.providers||[]).map(p => `<div class="small" style="margin-top:6px"><b>Served by</b> ${esc(p.repo)} / process <b>${esc(p.process||"-")}</b> — ${esc(p.server_class)}</div>` +
-      (p.operations||[]).map(o => `<details><summary>${esc(o.operation)} → ${esc(o.qualname||"")}${o.tested_by && o.tested_by.length ? " · tested by "+o.tested_by.map(x=>esc(x.test)).join(", ") : ""}</summary>${o.text ? pre(o.text) : ""}</details>`).join("")).join("")}
-    ${(t.consumers||[]).map(c => `<details><summary><b>Called by</b> ${esc(c.repo)} / process <b>${esc(c.process||"-")}</b> — ${esc(c.caller)} (${esc(c.operation||"")}${c.confidence < 0.8 ? ", confidence "+c.confidence : ""})</summary>${c.text ? pre(c.text) : ""}</details>`).join("")}
+    ${(t.providers||[]).map(p => `<div class="small" style="margin-top:6px"><b>Served by</b> ${esc(p.repo)} / process <b>${esc(p.process||"-")}</b> — ${where(p.server_class, p.file)}</div>` +
+      (p.operations||[]).map(o => `<details><summary>${esc(o.operation)} → ${where(o.qualname||"", o.file)}${o.tested_by && o.tested_by.length ? " · tested by "+o.tested_by.map(x=>where(x.test, x.file)).join(", ") : ""}</summary>${o.text ? pre(o.text) : ""}</details>`).join("")).join("")}
+    ${(t.consumers||[]).map(c => `<details><summary><b>Called by</b> ${esc(c.repo)} / process <b>${esc(c.process||"-")}</b> — ${where(c.caller, c.file)} (${esc(c.operation||"")}${c.confidence < 0.8 ? ", confidence "+c.confidence : ""})</summary>${c.text ? pre(c.text) : ""}</details>`).join("")}
     ${(t.checks||[]).length ? `<div class="small warn">Checks: ${t.checks.map(esc).join("; ")}</div>` : ""}</div>`;
 }
 function render(mode, r) {
   if (mode === "search") {
     return r.repos.map(x => `<h3 style="font-size:15px;margin:14px 0 4px">${esc(x.repo)}</h3>` +
         (x.hits.length ? x.hits.map(h => unitHtml(h.node, h.parent, h.relations)).join("") : `<p class="small">No relevant units.</p>`) +
-        (x.more.length ? `<div class="small">More: ${x.more.map(m => esc(m.qualname)).join(", ")}</div>` : "")).join("") +
+        (x.more.length ? `<div class="small">More: ${x.more.map(m => where(m.qualname, m.file)).join(", ")}</div>` : "")).join("") +
       (r.interfaces.length ? `<h3 style="font-size:15px;margin-top:18px">Interfaces involved</h3>` + r.interfaces.map(traceHtml).join("") : "");
   }
   if (mode === "trace") return traceHtml(r.trace);
   if (!r.impact.length) return `<p class="small">Symbol not found in any repository.</p>`;
   return r.impact.map(x => `<h3 style="font-size:15px;margin:14px 0 4px">${esc(x.repo)}</h3>` +
-    (x.local||[]).map(l => `<div class="unit"><div class="h">${esc(l.node.kind)} <code>${esc(l.node.qualname)}</code> <span class="small">${esc(l.node.file)}</span></div>
-      <div class="small"><b>Callers:</b> ${l.callers.map(c => esc(c.qualname)+" (level "+c.level+")").join(", ") || "none"}</div>
-      <div class="small"><b>Tested by:</b> ${l.tested_by.map(t => esc(t.test)).join(", ") || "no test evidence"}</div>
+    (x.local||[]).map(l => `<div class="unit"><div class="h">${esc(l.node.kind)} <code>${esc(l.node.qualname)}</code> <span class="fp">${esc(l.node.file)}${l.node.lines ? ":" + l.node.lines[0] + "–" + l.node.lines[1] : ""}</span></div>
+      <div class="small"><b>Callers:</b> ${l.callers.map(c => where(c.qualname, c.file, c.line)+" (level "+c.level+")").join(", ") || "none"}</div>
+      <div class="small"><b>Tested by:</b> ${l.tested_by.map(t => where(t.test, t.file)).join(", ") || "no test evidence"}</div>
       <div class="small"><b>Processes:</b> ${l.processes.map(esc).join(", ") || "-"}</div></div>`).join("") +
     (x.interfaces||[]).filter(t => t.found).map(t => `<div class="iface"><b>Through IDL ${esc(t.interface)}</b>${t.via ? " (via "+esc(t.via)+")" : ""}
-      <div class="small">Clients affected: ${t.consumers.map(c => esc(c.repo)+" / "+esc(c.process||"-")+" "+esc(c.caller)).join("; ") || "none found"}</div></div>`).join("")).join("");
+      <div class="small">Clients affected: ${t.consumers.map(c => esc(c.repo)+" / "+esc(c.process||"-")+" "+where(c.caller, c.file)).join("; ") || "none found"}</div></div>`).join("")).join("");
 }
 async function showHistory() {
   $("#resDir").textContent = S.results_dir || "results/";
@@ -564,7 +569,7 @@ function kgRepoDetail(repo) {
     <div class="chips" style="margin:8px 0">${Object.entries(o.kinds || {}).sort((a,b) => b[1]-a[1]).map(([k,v]) => `<span class="chip">${esc(k)} ${v}</span>`).join("")}</div>
     <div class="small">${o.files} files · ${o.nodes} nodes · ${o.links} links · ${o.cross_repo} to other repositories</div>`;
 }
-const linkHtml = (x, home) => `<span class="lk ${x.repo !== home ? "xr" : ""}" data-r="${esc(x.repo)}" data-u="${esc(x.uid)}" title="${esc(x.file || "")}">${esc(x.kind === "target" ? x.name : (x.qualname || x.name || x.uid))} <span class="r">${x.repo !== home ? "· " + esc(x.repo) : ""}${x.kind ? " · " + esc(x.kind) : ""}${x.confidence > 0 && x.confidence < 0.9 ? " · confidence " + x.confidence : ""}</span></span>`;
+const linkHtml = (x, home) => `<span class="lk ${x.repo !== home ? "xr" : ""}" data-r="${esc(x.repo)}" data-u="${esc(x.uid)}" title="${esc(x.file || "")}">${esc(x.kind === "target" ? x.name : (x.qualname || x.name || x.uid))} <span class="fp">${x.file ? esc(x.file) + (x.start_line ? ":" + x.start_line : "") : "(not in the indexed code)"}</span> <span class="r">${x.repo !== home ? "· " + esc(x.repo) : ""}${x.kind ? " · " + esc(x.kind) : ""}${x.confidence > 0 && x.confidence < 0.9 ? " · confidence " + x.confidence : ""}</span></span>`;
 function kgShow(n) {
   const groups = (obj, arrow) => Object.entries(obj).map(([k, v]) => `<div class="lgroup"><b>${arrow} ${esc(k)}</b> <span class="rb">${v.length}</span>${v.slice(0, 60).map(x => linkHtml(x, n.repo)).join("")}</div>`).join("");
   const links = groups(n.links_out, "→") + groups(n.links_in, "←");

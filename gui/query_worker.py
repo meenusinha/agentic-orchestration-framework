@@ -116,6 +116,13 @@ FENCE = {".c": "c", ".h": "c", ".cc": "cpp", ".cpp": "cpp", ".cxx": "cpp", ".hpp
          ".ts": "typescript", ".go": "go", ".rs": "rust", ".cs": "csharp"}
 
 
+def where(name, file, line=None, repo=None):
+    """`name` (file:line) — every unit is shown with its file; units outside the index say so."""
+    if not file:
+        return f"`{name}` (not in the indexed code)"
+    return f"`{name}` (`{(repo + ':') if repo else ''}{file}{f':{line}' if line else ''}`)"
+
+
 def code(text, lang=""):
     fence = "````" if "```" in (text or "") else "```"
     return f"{fence}{lang}\n{(text or '').rstrip()}\n{fence}"
@@ -126,13 +133,14 @@ def md_unit(n, parent=None, relations=None):
              f"`{n['file']}:{n['lines'][0]}-{n['lines'][1]}`" + (f" · process **{n['process']}**" if n.get("process") else "")
              + f" · {n['role']}" + (f" · `#if {n['ifdef']}`" if n.get("ifdef") else "")]
     if parent and parent.get("skeleton") and parent["skeleton"] != "(shown above)":
-        lines += [f"In {parent.get('kind', '')} `{parent['qualname']}`:", code(parent["skeleton"])]
+        lines += [f"In {parent.get('kind', '')} {where(parent['qualname'], parent.get('file'))}:", code(parent["skeleton"])]
     lines.append(code(n.get("text", ""), FENCE.get(Path(n["file"]).suffix.lower(), "")))
     for key in ("calls_operation", "implements", "tested_by", "called_by", "calls"):
         vals = (relations or {}).get(key)
         if vals:
-            names = [v.get("name") or v.get("qualname") for v in vals][:8]
-            lines.append(f"- **{key.replace('_', ' ')}:** " + ", ".join(f"`{x}`" for x in names))
+            names = [where(v.get("name") or v.get("qualname"), v.get("file"), v.get("line"), v.get("repo"))
+                     for v in vals][:8]
+            lines.append(f"- **{key.replace('_', ' ')}:** " + ", ".join(names))
     return "\n".join(lines)
 
 
@@ -144,8 +152,8 @@ def md_trace(t):
     if t.get("definition_text"):
         lines.append(code(t["definition_text"], "idl"))
     for p in t.get("providers", []):
-        lines.append(f"**Served by** {p['repo']} / process **{p.get('process') or '-'}** — `{p.get('server_class')}`"
-                     f" (confidence {p['confidence']})")
+        lines.append(f"**Served by** {p['repo']} / process **{p.get('process') or '-'}** — "
+                     f"{where(p.get('server_class'), p.get('file'))} (confidence {p['confidence']})")
         for o in p.get("operations", []):
             lines.append(f"- `{o['operation']}` → `{o.get('qualname')}` `{o.get('file')}`" +
                          (f" · tested by {', '.join(x['test'] for x in o.get('tested_by', []))}" if o.get("tested_by") else ""))
@@ -173,7 +181,7 @@ def md_report(mode, text, repo, result):
             for h in r["hits"]:
                 body.append(md_unit(h["node"], h.get("parent"), h.get("relations")))
             if r["more"]:
-                body.append("More matches: " + ", ".join(f"`{m['qualname']}`" for m in r["more"]))
+                body.append("More matches: " + ", ".join(where(m["qualname"], m.get("file")) for m in r["more"]))
         if result["interfaces"]:
             body.append("## Interfaces involved")
             body += [md_trace(t) for t in result["interfaces"]]
@@ -187,14 +195,17 @@ def md_report(mode, text, repo, result):
             for l in r.get("local", []):
                 n = l["node"]
                 body.append(f"### {n['kind']} `{n['qualname']}` — `{n['file']}`")
-                body.append("- **Callers:** " + (", ".join(f"`{c['qualname']}` (level {c['level']})" for c in l["callers"]) or "none"))
-                body.append("- **Tested by:** " + (", ".join(f"`{t['test']}`" for t in l["tested_by"]) or "no test evidence"))
+                body.append("- **Callers:** " + (", ".join(f"{where(c['qualname'], c.get('file'), c.get('line'))} (level {c['level']})"
+                                                         for c in l["callers"]) or "none"))
+                body.append("- **Tested by:** " + (", ".join(where(t["test"], t.get("file")) for t in l["tested_by"])
+                                                   or "no test evidence"))
                 body.append("- **Processes:** " + (", ".join(l["processes"]) or "-"))
             for t in r.get("interfaces", []):
                 if t.get("found"):
                     body.append(f"**Through IDL** `{t['interface']}`" + (f" (via `{t['via']}`)" if t.get("via") else ""))
                     body.append("- **Clients affected:** " + (", ".join(
-                        f"{c['repo']} / {c.get('process') or '-'} `{c['caller']}`" for c in t["consumers"]) or "none found"))
+                        f"{c['repo']} / {c.get('process') or '-'} {where(c['caller'], c.get('file'))}" for c in t["consumers"])
+                        or "none found"))
     return "\n\n".join(head + body) + "\n"
 
 

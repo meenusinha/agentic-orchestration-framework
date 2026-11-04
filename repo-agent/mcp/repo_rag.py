@@ -144,6 +144,13 @@ def neutralise(obj):
 _MODELS: dict = {}
 
 
+def _where(name, file, line=None, repo=None) -> str:
+    """'name (file:line)' — every unit is reported with its file; units outside the index say so."""
+    if not file:
+        return f"{name} (not in the indexed code)"
+    return f"{name} ({(repo + ':') if repo else ''}{file}{f':{line}' if line else ''})"
+
+
 class RepoRAG:
     def __init__(self, repo_name: str, repo_root: str, roots: list, embedding_model: str,
                  file_types: dict = None, structure: list = None, extra_extensions: list = None,
@@ -243,25 +250,29 @@ class RepoRAG:
                    (f", process {n['process']}" if n.get("process") else "") + ")"
             block = [head]
             if r.get("parent") and r["parent"].get("skeleton") not in (None, "(shown above)"):
-                block.append(f"[in {r['parent']['kind']} {r['parent']['qualname']}]\n{r['parent']['skeleton']}")
+                block.append(f"[in {r['parent']['kind']} {r['parent']['qualname']} ({r['parent'].get('file')})]\n"
+                             f"{r['parent']['skeleton']}")
             block.append(n["text"])
             rel = r.get("relations", {})
             for key in ("calls_operation", "implements", "tested_by", "called_by", "calls"):
                 if rel.get(key):
-                    names = [x.get("name") or x.get("qualname") for x in rel[key]][:6]
+                    names = [_where(x.get("name") or x.get("qualname"), x.get("file"), x.get("line"), x.get("repo"))
+                             for x in rel[key]][:6]
                     block.append(f"{key.replace('_', ' ')}: {', '.join(names)}")
             for t in r.get("interfaces", []):
                 if not t.get("found"):
                     continue
-                prov = "; ".join(f"{p['repo']}/{p['process'] or '-'} {p['server_class']}" for p in t["providers"]) or "none"
-                cons = "; ".join(f"{c['repo']}/{c['process'] or '-'} {c['caller']}" for c in t["consumers"]) or "none"
+                prov = "; ".join(f"{p['repo']}/{p['process'] or '-'} {p['server_class']} ({p.get('file')})"
+                                 for p in t["providers"]) or "none"
+                cons = "; ".join(f"{c['repo']}/{c['process'] or '-'} {c['caller']} ({c.get('file')})"
+                                 for c in t["consumers"]) or "none"
                 block.append(f"IDL interface {t['interface']} (defined in {t['defined_in']['repo']}:"
                              f"{t['defined_in']['file']}) — providers: {prov} — consumers: {cons}" +
                              (f" — checks: {'; '.join(t['checks'])}" if t["checks"] else ""))
             parts.append("\n".join(block))
         if res["more"]:
             parts.append("More matches (not shown whole within the budget; fetch with get_node): " +
-                         ", ".join(f"{m['qualname']} [{m['id']}]" for m in res["more"]))
+                         ", ".join(f"{m['qualname']} ({m['file']}) [{m['id']}]" for m in res["more"]))
         result = "RELEVANT KNOWLEDGE:\n" + frame(self.repo_name, "\n\n".join(parts))
         log(self.repo_name, "RESULT", f"Returning {len(res['results'])} whole unit(s), {len(result)} chars")
         return result
