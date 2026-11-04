@@ -31,4 +31,8 @@ First release for VS Code with GitHub Copilot, on Windows and Linux, under the A
   redaction, private storage, untrusted-content framing, dependency audit (`tests/run_all.py`).
 - **Bundled embedding model** (`models/`, Apache 2.0, unmodified, every file hash-pinned):
   works right after cloning, nothing to download.
+- **Settings page**: GraphRAG creation (folders, exclude globs, file size, batch size, refresh)
+  and query settings (top_k, budget, candidate pool, rank fusion, impact depth, role weights),
+  router settings; defaults shown, values validated, comments in config files kept.
+- **Typed paths** for the model folder (used in place, hash-checked) and for repositories.
 - **Documentation**: architecture, security considerations, security evidence.

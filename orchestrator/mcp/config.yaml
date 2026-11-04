@@ -23,6 +23,14 @@ repos:
 # Log file — private (0600) per-user location by default; tail -f it in a terminal
 log_file: ~/.agentic-orchestration/logs/mcp-orchestration.log
 
-# Include code/doc snippets and feature-request text in the logs (demos only).
+# Include code/doc snippets and feature-request text in the logs (troubleshooting only).
 # Off by default so logs never hold source code.
 log_content: false
+
+# Router: repositories picked per request, and search hits per repository used for routing
+router_top_repos: 2
+router_hits_per_repo: 6
+
+# Embedding model folder, used in place and hash-checked like any copy.
+# Empty = the model included in this framework (models/granite-embedding-small-english-r2).
+model_path: ""

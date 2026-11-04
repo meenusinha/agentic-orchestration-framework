@@ -104,6 +104,12 @@ details summary{cursor:pointer;color:var(--muted);font-size:12.5px;padding:2px 0
 .kgd h3{margin:0 0 4px;font-size:16px;word-break:break-all}.lk{display:block;padding:3px 0;font-size:12.5px;cursor:pointer;color:var(--accent)}
 .lk:hover{text-decoration:underline}.lk .r{color:var(--muted)}#kgFound .lk{font-weight:400}.lk.xr{font-weight:600}
 .lgroup{margin:12px 0;padding-top:10px;border-top:1px solid var(--line2)}.lgroup b{font-size:11.5px;color:var(--muted);text-transform:uppercase;letter-spacing:.04em}
+.sgrid{display:grid;grid-template-columns:minmax(220px,1.3fr) 1fr;gap:8px 16px;align-items:center}
+.sgrid label{font-size:13.5px;color:var(--ink2)}.sgrid .hintd{font-size:11.5px;color:var(--muted)}
+.sgrid input[type=text],.sgrid input[type=number]{width:100%}.wgrid{display:grid;grid-template-columns:repeat(auto-fill,minmax(200px,1fr));gap:8px 18px}
+.wgrid label{display:flex;justify-content:space-between;align-items:center;gap:10px;font-size:13px;min-width:0}.wgrid input{width:80px;flex:none}
+input[type=number]{font:inherit;font-size:14px;padding:7px 9px;border-radius:9px;border:1px solid var(--line);background:#fff;color:var(--ink)}
+input[type=number]:focus{outline:none;border-color:#93c5fd;box-shadow:var(--ring)}input.bad{border-color:var(--bad)}
 .fp{font:11.5px ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;color:var(--muted)}
 .hist{display:flex;justify-content:space-between;align-items:center;gap:10px;padding:9px 4px;border-bottom:1px solid var(--line2);font-size:13px}
 .hist:last-child{border-bottom:0}.hist:hover{background:var(--soft)}
@@ -139,7 +145,7 @@ details summary{cursor:pointer;color:var(--muted);font-size:12.5px;padding:2px 0
 
     <section data-step="model">
       <h2>2. Embedding model</h2>
-      <p class="sub">The approved model <code>ibm-granite/granite-embedding-small-english-r2</code> (Apache 2.0, ~95&nbsp;MB) is included in the framework's <code>models/</code> folder. Every file is checked against its pinned SHA-256 fingerprint. Only if it is missing do you need to point to another copy — nothing is ever downloaded.</p>
+      <p class="sub">The approved model <code>ibm-granite/granite-embedding-small-english-r2</code> (Apache 2.0, ~95&nbsp;MB) is included in the framework's <code>models/</code> folder. Every file is checked against its pinned SHA-256 fingerprint. You can also type the path of another folder holding the approved model to use it in place — nothing is ever downloaded.</p>
       <div id="modelStatus"></div>
       <div id="modelChoices"></div>
       <div class="log" id="modelLog"></div>
@@ -152,8 +158,9 @@ details summary{cursor:pointer;color:var(--muted);font-size:12.5px;padding:2px 0
       <div class="addgrid">
         <div class="card">
           <h3>Already cloned</h3>
-          <p class="small">Pick the repository's folder on this computer.</p>
-          <button id="addRepo">Choose folder…</button>
+          <p class="small">Type or paste the repository's folder path, or choose it.</p>
+          <div class="row"><input type="text" id="repoPath" placeholder="/path/to/repository" style="flex:1;min-width:200px"><button id="repoPathAdd">Add</button></div>
+          <div class="row" style="margin-top:8px"><button id="addRepo">Choose folder…</button><span class="small err" id="repoPathErr"></span></div>
           <div id="suggest" style="margin-top:12px"></div>
         </div>
         <div class="card">
@@ -161,7 +168,7 @@ details summary{cursor:pointer;color:var(--muted);font-size:12.5px;padding:2px 0
           <div class="field"><label for="cUrl">Repository URL</label><input type="text" id="cUrl" placeholder="https://git.example.com/team/repo.git  or  git@git.example.com:team/repo.git"></div>
           <div class="field"><label for="cBranch">Branch</label><input type="text" id="cBranch" placeholder="leave empty for the default branch"></div>
           <div class="field"><label for="cParent">Clone into this folder</label>
-            <div class="row"><input type="text" id="cParent" placeholder="choose where to clone" readonly><button id="cChoose">Choose…</button></div></div>
+            <div class="row"><input type="text" id="cParent" placeholder="type a folder path or choose one"><button id="cChoose">Choose…</button></div></div>
           <div class="field"><label for="cName">Folder name</label><input type="text" id="cName" placeholder="from the URL"></div>
           <div class="row"><button class="primary" id="cGo" disabled>Clone and add</button><span class="small" id="cWhere"></span></div>
           <div class="small" id="cSamples" style="margin-top:10px"></div>
@@ -203,6 +210,19 @@ details summary{cursor:pointer;color:var(--muted);font-size:12.5px;padding:2px 0
       <div class="kg"><div class="kgtree" id="kgTree"></div><div class="kgd" id="kgDetail"><p class="small">Select a node in the tree.</p></div></div>
     </section>
 
+    <section data-step="settings">
+      <h2>Settings</h2>
+      <p class="sub">How the GraphRAG is created and how queries behave. Every value shows its default. Creation settings take effect when the GraphRAG is rebuilt; query settings take effect immediately on this page, and in Copilot after reloading VS Code.</p>
+      <div class="row" style="margin-bottom:12px"><label for="setRepo" class="small">Repository</label><select id="setRepo"></select>
+        <label class="small"><input type="checkbox" id="setAll"> apply to all repositories</label></div>
+      <div class="card"><h3>GraphRAG creation</h3><div class="sgrid" id="setCreation"></div></div>
+      <div class="card"><h3>Queries</h3><div class="sgrid" id="setQuery"></div>
+        <div style="margin-top:12px" class="small">Ranking weight per folder role (0 = never returned)</div><div class="wgrid" id="setWeights" style="margin-top:6px"></div></div>
+      <div class="card"><h3>Router <span class="small">(all repositories)</span></h3><div class="sgrid" id="setRouter"></div></div>
+      <div class="row"><button id="setReset">Reset to defaults</button><span class="spacer"></span><button class="primary" id="setSave">Save</button></div>
+      <div id="setResult" style="margin-top:12px"></div><div class="log" id="setLog"></div>
+    </section>
+
     <section data-step="queries">
       <h2>Queries</h2>
       <p class="sub">Use the query field at the top. Every result is also saved as a new Markdown file in <code id="resDir"></code> — earlier results are never overwritten.</p>
@@ -232,7 +252,7 @@ const esc = s => String(s ?? "").replace(/[&<>"']/g, c => ({"&":"&amp;","<":"&lt
 async function api(path, body) {
   const r = await fetch(path, body === undefined ? {headers:{"X-Token":T}} :
     {method:"POST", headers:{"X-Token":T,"Content-Type":"application/json"}, body:JSON.stringify(body)});
-  const j = await r.json(); if (!r.ok) throw new Error(j.error || r.statusText); return j;
+  const j = await r.json(); if (!r.ok) { const e = new Error(j.error || r.statusText); e.details = j; throw e; } return j;
 }
 function runJob(start, logEl) {
   return new Promise(async (resolve, reject) => {
@@ -253,12 +273,13 @@ function nav() {
     const reach = i === 0 || done.has(STEPS[i-1][0]) || done.has(k);
     return `<li class="${k===cur?"active":""} ${done.has(k)?"done":""} ${reach?"reach":""}" data-k="${k}"><span class="dot">${done.has(k)?"✓":i+1}</span>${l}</li>`;
   }).join("") + `<li class="sep ${cur==="queries"?"active":""} ${S.graph_ready?"reach":""}" data-k="queries"><span class="dot">?</span>Queries</li>`
-    + `<li class="${cur==="graph"?"active":""} ${S.graph_ready?"reach":""}" data-k="graph"><span class="dot">⌥</span>Knowledge graph</li>`;
+    + `<li class="${cur==="graph"?"active":""} ${S.graph_ready?"reach":""}" data-k="graph"><span class="dot">⌥</span>Knowledge graph</li>`
+    + `<li class="${cur==="settings"?"active":""} ${(S.repos||[]).length?"reach":""}" data-k="settings"><span class="dot">⚙</span>Settings</li>`;
   qbarState();
   document.querySelectorAll("nav li.reach").forEach(li => li.onclick = () => go(li.dataset.k));
   document.querySelectorAll("main section").forEach(s => s.classList.toggle("active", s.dataset.step === cur));
 }
-function go(k) { cur = k; nav(); ({model:showModel, repos:showRepos, review:showReview, configure:showConfigure, queries:showHistory, graph:showGraph})[k]?.(); window.scrollTo(0,0); }
+function go(k) { cur = k; nav(); ({model:showModel, repos:showRepos, review:showReview, configure:showConfigure, queries:showHistory, graph:showGraph, settings:showSettings})[k]?.(); window.scrollTo(0,0); }
 function finish(k, next) { done.add(k); go(next); }
 const status = (ok, text) => `<div class="status"><b class="${ok?"ok":"warn"}">${ok?"✓":"●"}</b>${text}</div>`;
 
@@ -277,22 +298,32 @@ $("#installNext").onclick = () => finish("install","model");
 
 /* 2 model */
 function showModel() {
-  if (S.model_ok) {
-    $("#modelStatus").innerHTML = status(true, "Model ready and verified (all files match their fingerprints): <code>"+esc(S.model_dir)+"</code>");
-    $("#modelChoices").innerHTML = `<button class="primary" id="modelNext">Continue</button>`;
-    $("#modelNext").onclick = () => finish("model","repos"); return;
-  }
-  $("#modelStatus").innerHTML = status(false, "The model is not usable: " + esc(S.model_problem || "missing") + ". Restore it with <code>git checkout -- models/</code> in the framework folder, or point to another copy of the approved model.");
-  const copies = (S.model_copies||[]).map(c => `<div class="cmd"><code>${esc(c)}</code><button data-copy="${esc(c)}">Use this copy</button></div>`).join("");
+  const ok = S.model_ok;
+  $("#modelStatus").innerHTML = ok
+    ? status(true, "Model ready and verified (all files match their fingerprints)" + (S.model_custom ? " — used in place from the folder below" : ""))
+    : status(false, "The model is not usable: " + esc(S.model_problem || "missing") + ". Type the path of a folder holding the approved model, or restore the included one with <code>git checkout -- models/</code>.");
+  const copies = (S.model_copies||[]).map(c => `<div class="cmd"><code>${esc(c)}</code><button data-use="${esc(c)}">Use this folder</button></div>`).join("");
   $("#modelChoices").innerHTML = `
-    ${copies ? `<h3 style="font-size:14px;margin:8px 0">Copies found on this computer</h3>${copies}` : ""}
-    <h3 style="font-size:14px;margin:16px 0 8px">Folder that holds the model</h3>
-    <div class="row"><input type="text" id="modelPath" placeholder="/path/to/granite-embedding-small-english-r2" style="flex:1;min-width:260px">
-    <button id="modelBrowse">Browse…</button><button class="primary" id="modelUse">Copy model</button></div>
-    <p class="small">The folder must contain <code>model.safetensors</code> and the model's JSON files (a Hugging Face snapshot folder works).</p>`;
-  document.querySelectorAll("[data-copy]").forEach(b => b.onclick = () => installModel({mode:"copy", path:b.dataset.copy}));
-  $("#modelBrowse").onclick = () => pick(p => $("#modelPath").value = p);
-  $("#modelUse").onclick = () => $("#modelPath").value && installModel({mode:"copy", path:$("#modelPath").value});
+    ${!ok && copies ? `<h3 style="font-size:14px;margin:8px 0">Copies found on this computer</h3>${copies}` : ""}
+    <h3 style="font-size:14px;margin:12px 0 8px">Model folder</h3>
+    <div class="row"><input type="text" id="modelPath" value="${esc(S.model_dir)}" placeholder="/path/to/granite-embedding-small-english-r2" style="flex:1;min-width:260px">
+    <button id="modelBrowse">Browse…</button><button class="primary" id="modelUse">Use this folder</button></div>
+    <p class="small">Type or paste a path. The folder is used where it is (nothing is copied), after every file is checked against its pinned fingerprint.
+      ${S.model_custom ? `<button class="link" id="modelDefault">Use the included model instead</button>` : ""}
+      ${!ok ? `Or <button class="link" id="modelCopy">copy it into the framework</button>.` : ""}</p>
+    ${ok ? `<div class="row"><span class="spacer"></span><button class="primary" id="modelNext">Continue</button></div>` : ""}`;
+  document.querySelectorAll("[data-use]").forEach(b => b.onclick = () => useModelFolder(b.dataset.use));
+  $("#modelBrowse").onclick = () => pick(p => $("#modelPath").value = p, $("#modelPath").value);
+  $("#modelUse").onclick = () => $("#modelPath").value.trim() && useModelFolder($("#modelPath").value.trim());
+  if ($("#modelDefault")) $("#modelDefault").onclick = () => useModelFolder("");
+  if ($("#modelCopy")) $("#modelCopy").onclick = () => $("#modelPath").value.trim() && installModel({mode:"copy", path:$("#modelPath").value.trim()});
+  if ($("#modelNext")) $("#modelNext").onclick = () => finish("model","repos");
+}
+async function useModelFolder(path) {
+  document.querySelectorAll("#modelChoices button").forEach(b => b.disabled = true);
+  try { await runJob(() => api("/api/model_path", {path}), $("#modelLog")); S = await api("/api/state"); showModel(); if (S.model_ok) done.add("model"); nav(); }
+  catch (e) { $("#modelStatus").innerHTML = status(false, `<span class="bad">${esc(e.message)}</span>`);
+    document.querySelectorAll("#modelChoices button").forEach(b => b.disabled = false); }
 }
 async function installModel(body) {
   document.querySelectorAll("#modelChoices button").forEach(b => b.disabled = true);
@@ -322,7 +353,17 @@ function showRepos() {
   document.querySelectorAll("[data-add]").forEach(b => b.onclick = () => addRepo(b.dataset.add));
   $("#reposNext").disabled = repos.length < 2 || new Set(repos.map(r => r.name)).size !== repos.length;
 }
-$("#addRepo").onclick = () => pick(addRepo);
+$("#addRepo").onclick = () => pick(addRepo, $("#repoPath").value.trim() || undefined);
+$("#repoPathAdd").onclick = async () => {
+  const path = $("#repoPath").value.trim(); $("#repoPathErr").textContent = "";
+  if (!path) return;
+  try { const d = await api("/api/fs?path=" + encodeURIComponent(path));
+    if (!d.found) throw new Error("folder not found");
+    addRepo(d.path); $("#repoPath").value = ""; }
+  catch (e) { $("#repoPathErr").textContent = "Not a folder: " + path; }
+};
+$("#repoPath").onkeydown = (e) => { if (e.key === "Enter") $("#repoPathAdd").click(); };
+$("#cParent").oninput = () => cloneState();
 /* clone from Git: URL + branch, into a folder the user chooses */
 const urlName = u => (u.trim().replace(/[\/\\]+$/,"").split(/[\/:\\]/).pop() || "").replace(/\.git$/,"").replace(/[^A-Za-z0-9._-]+/g,"-");
 let nameTouched = false;
@@ -615,6 +656,76 @@ async function kgFind() {
   document.querySelectorAll("#kgFound .lk").forEach(a => a.onclick = () => reveal(a.dataset.r, a.dataset.u));
 }
 $("#kgFindBtn").onclick = kgFind; $("#kgFind").onkeydown = (e) => { if (e.key === "Enter") kgFind(); };
+
+/* settings: GraphRAG creation, queries, router — every value with its default */
+let SET = null;
+function fieldHtml(sp, value) {
+  const id = "s_" + sp.key, def = Array.isArray(sp.default) ? (sp.default.join(", ") || "none") : sp.default;
+  const v = Array.isArray(value) ? value.join(", ") : value;
+  const input = sp.kind === "int"
+    ? `<input type="number" id="${id}" value="${esc(v)}" min="${sp.min}" max="${sp.max}" step="1">`
+    : `<input type="text" id="${id}" value="${esc(v)}" placeholder="${sp.kind === "paths" ? "path, path …" : "comma-separated"}">`;
+  return `<label for="${id}">${esc(sp.label)}<div class="hintd">default ${esc(def)}${sp.kind === "int" ? ` · ${sp.min}–${sp.max}` : ""}</div></label>${input}`;
+}
+function fillSettings() {
+  const r = SET.repos.find(x => x.name === $("#setRepo").value) || SET.repos[0]; if (!r) return;
+  $("#setCreation").innerHTML = SET.spec.filter(x => x.group === "creation").map(sp => fieldHtml(sp, r.values[sp.key])).join("");
+  $("#setQuery").innerHTML = SET.spec.filter(x => x.group === "query" && x.kind !== "weights").map(sp => fieldHtml(sp, r.values[sp.key])).join("");
+  const wdef = SET.defaults.role_weights;
+  $("#setWeights").innerHTML = Object.keys(wdef).map(role => `<label>${esc(role)} <input type="number" step="0.05" min="0" max="3" data-role="${esc(role)}" value="${r.values.role_weights[role]}" title="default ${wdef[role]}"></label>`).join("");
+  $("#setRouter").innerHTML = SET.router_spec.map(sp => fieldHtml(sp, SET.router[sp.key])).join("");
+}
+async function showSettings() {
+  $("#setResult").innerHTML = ""; $("#setLog").style.display = "none";
+  try { SET = await api("/api/settings"); } catch (e) { $("#setResult").innerHTML = `<p class="bad">${esc(e.message)}</p>`; return; }
+  if (!SET.repos.length) { $("#setResult").innerHTML = `<p class="small">Configure repositories first (step 5).</p>`; return; }
+  const keep = $("#setRepo").value;
+  $("#setRepo").innerHTML = SET.repos.map(r => `<option ${r.name === keep ? "selected" : ""}>${esc(r.name)}</option>`).join("");
+  $("#setRepo").onchange = fillSettings; fillSettings();
+}
+function readSettings() {
+  const out = {}, rout = {};
+  const val = (sp) => { const el = $("#s_" + sp.key); if (!el) return undefined;
+    if (sp.kind === "int") return el.value.trim();
+    const parts = el.value.split(",").map(x => x.trim()).filter(Boolean);
+    return sp.kind === "paths" ? (parts.length === 1 ? parts[0] : parts) : parts; };
+  SET.spec.filter(x => x.kind !== "weights").forEach(sp => { out[sp.key] = val(sp); });
+  out.role_weights = {}; document.querySelectorAll("#setWeights input").forEach(i => out.role_weights[i.dataset.role] = i.value);
+  SET.router_spec.forEach(sp => { rout[sp.key] = val(sp); });
+  return [out, rout];
+}
+$("#setReset").onclick = () => {
+  const r = SET.repos.find(x => x.name === $("#setRepo").value); if (!r) return;
+  r.values = JSON.parse(JSON.stringify(SET.defaults)); r.values.src_path = SET.repos.find(x => x.name === r.name).values.src_path;
+  SET.router = JSON.parse(JSON.stringify(SET.router_defaults)); fillSettings();
+  $("#setResult").innerHTML = `<div class="status"><b class="warn">●</b>Defaults filled in — click Save to apply them.</div>`;
+};
+$("#setSave").onclick = async () => {
+  const [vals, rvals] = readSettings();
+  const targets = $("#setAll").checked ? SET.repos.map(r => r.name) : [$("#setRepo").value];
+  const body = {repos: Object.fromEntries(targets.map(n => [n, $("#setAll").checked && n !== $("#setRepo").value
+                  ? Object.fromEntries(Object.entries(vals).filter(([k]) => !["src_path","knowledge_path"].includes(k))) : vals])),
+                router: rvals};
+  $("#setSave").disabled = true;
+  try {
+    const r = await api("/api/settings", body);
+    $("#setResult").innerHTML = `<div class="status"><b class="ok">✓</b>Saved. Query settings apply now on this page; reload VS Code so Copilot uses them.</div>` +
+      (r.rebuild_needed.length ? `<div class="status"><b class="warn">●</b>Creation settings changed for ${r.rebuild_needed.map(esc).join(", ")} — the GraphRAG must be rebuilt.
+         <button class="primary" id="setRebuild">Rebuild GraphRAG now</button></div>` : "");
+    if ($("#setRebuild")) $("#setRebuild").onclick = async () => {
+      $("#setRebuild").disabled = true;
+      try { await runJob(() => api("/api/verify", {}), $("#setLog")); S = await api("/api/state"); kgLoaded = false;
+        $("#setResult").innerHTML = `<div class="status"><b class="ok">✓</b>GraphRAG rebuilt with the new settings. Reload VS Code so Copilot uses it.</div>`; }
+      catch (e) { $("#setResult").innerHTML += `<p class="bad">${esc(e.message)}</p>`; }
+    };
+    SET = await api("/api/settings"); fillSettings();
+  } catch (e) {
+    let msg = e.message;
+    if (e.details && e.details.errors) msg = Object.entries(e.details.errors).map(([k, v]) => `${k}: ${v.join("; ")}`).join(" · ");
+    $("#setResult").innerHTML = `<div class="status"><b class="warn">●</b><span class="bad">${esc(msg)}</span></div>`;
+  }
+  $("#setSave").disabled = false;
+};
 
 /* folder picker */
 let pickCb = null, pickPath = "";

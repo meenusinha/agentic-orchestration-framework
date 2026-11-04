@@ -53,7 +53,22 @@ GUI = FW / "gui"
 sys.path.insert(0, str(GUI))
 import gitclone  # noqa: E402  (standard library only)
 SCRIPTS = FW / "skills" / "cross-repo-feature-analysis" / "scripts"
-MODEL_DIR = FW / "models" / "granite-embedding-small-english-r2"
+sys.path.insert(0, str(FW / "repo-agent" / "mcp"))
+from codegraph import settings  # noqa: E402  (standard library only)
+ORCH_CFG = FW / "orchestrator" / "mcp" / "config.yaml"
+
+
+def orch_cfg() -> dict:
+    try:
+        import yaml
+        return yaml.safe_load(ORCH_CFG.read_text(encoding="utf-8")) or {}
+    except Exception:
+        return {}
+
+
+def model_dir() -> Path:
+    """The model folder in use: `model_path` from the config, or the bundled models/ folder."""
+    return settings.model_dir(FW, orch_cfg())
 WIN = os.name == "nt"
 TOKEN = secrets.token_urlsafe(24)
 PORT = 0
@@ -270,7 +285,7 @@ def suggestions() -> list:
 _MODEL_CHECK: dict = {"key": None, "problem": None}
 
 
-def model_problem() -> str | None:
+def model_problem(folder: Path | None = None) -> str | None:
     """None if every model file matches its pinned SHA-256, else what is wrong. The pins are
     read from repo-agent/mcp/repo_rag.py (the one the servers use), never duplicated here.
     Cached by file size and modification time, so the page stays fast."""
@@ -280,10 +295,14 @@ def model_problem() -> str | None:
     pins = dict(re.findall(r'"([\w./]+\.(?:json|safetensors))":\s+"([0-9a-f]{64})"', src))
     if not pins:
         return "the pinned fingerprints could not be read"
+    MODEL_DIR = Path(folder) if folder is not None else model_dir()
+    if not MODEL_DIR.is_dir():
+        return f"folder not found: {MODEL_DIR}"
     missing = [f for f in pins if not (MODEL_DIR / f).is_file()]
     if missing:
         return "missing " + ", ".join(missing)
-    key = tuple((f, (MODEL_DIR / f).stat().st_size, (MODEL_DIR / f).stat().st_mtime_ns) for f in sorted(pins))
+    key = (str(MODEL_DIR.resolve()),) + tuple((f, (MODEL_DIR / f).stat().st_size, (MODEL_DIR / f).stat().st_mtime_ns)
+                                              for f in sorted(pins))
     if _MODEL_CHECK["key"] != key:
         def digest(path: Path) -> str:      # JSON: line endings normalised, as in the servers
             data = path.read_bytes()
@@ -302,7 +321,8 @@ def state() -> dict:
                            capture_output=True, text=True)
         copies = [l.strip() for l in r.stdout.splitlines() if l.startswith("  /") or l.startswith("  ~")]
     return {"framework": str(FW), "python": sys.executable, "in_venv": sys.prefix != sys.base_prefix,
-            "deps_ok": ok, "model_ok": problem is None, "model_problem": problem, "model_dir": str(MODEL_DIR),
+            "deps_ok": ok, "model_ok": problem is None, "model_problem": problem, "model_dir": str(model_dir()),
+            "model_default_dir": str(settings.model_dir(FW, {})), "model_custom": bool(orch_cfg().get("model_path")),
             "model_copies": copies, "repos": configured_repos(), "suggestions": suggestions(),
             "graph_ready": graph_ready(), "results_dir": str(RESULTS),
             "home": str(Path.home()), "samples": gitclone.SAMPLE_REPOS, "git": gitclone.available()}
@@ -360,6 +380,98 @@ def job_configure(body):
     return run
 
 
+# ── GraphRAG creation / query settings ───────────────────────────────────────
+def set_yaml_key(text: str, key: str, value) -> str:
+    """Replace (or append) a top-level `key: …` in a YAML file, keeping comments and other keys."""
+    import re
+    import yaml
+    if value is None:                                   # remove the key (back to the default)
+        return re.sub(rf"(?m)^{re.escape(key)}:.*(?:\n(?:[ \t]+\S.*|-.*))*\n?", "", text)
+    line = f"{key}: {yaml.safe_dump(value, default_flow_style=True, sort_keys=False).strip().removesuffix('...').strip()}"
+    pattern = re.compile(rf"(?m)^{re.escape(key)}:.*(?:\n(?:[ \t]+\S.*|-.*))*")
+    text = pattern.sub(lambda _: line, text, count=1) if pattern.search(text) else text.rstrip("\n") + f"\n{line}\n"
+    if (yaml.safe_load(text) or {}).get(key) != value:
+        raise ValueError(f"could not update {key!r} safely")
+    return text
+
+
+def repo_cfg_path(r: dict) -> Path:
+    return Path(r["path"]).expanduser() / "mcp" / "config.yaml"
+
+
+def get_settings() -> dict:
+    import yaml
+    repos = []
+    for r in configured_repos():
+        p = repo_cfg_path(r)
+        rc = yaml.safe_load(p.read_text(encoding="utf-8")) if p.exists() else {}
+        repos.append({"name": r["name"], "path": r["path"], "values": settings.load(rc),
+                      "set": sorted(k for k in rc if k in settings.REPO_SETTINGS)})
+    return {"spec": settings.describe(), "router_spec": settings.describe(settings.ROUTER_SETTINGS),
+            "repos": repos, "router": settings.load(orch_cfg(), settings.ROUTER_SETTINGS),
+            "defaults": settings.defaults(), "router_defaults": settings.defaults(settings.ROUTER_SETTINGS)}
+
+
+def save_settings(body: dict) -> tuple[int, dict]:
+    import yaml
+    errors, plans = {}, []
+    names = {r["name"]: r for r in configured_repos()}
+    for name, values in (body.get("repos") or {}).items():
+        if name not in names:
+            errors[name] = [f"unknown repository {name!r}"]
+            continue
+        clean, errs = settings.validate(values)
+        if errs:
+            errors[name] = errs
+        plans.append((names[name], clean))
+    rclean, rerrs = settings.validate(body.get("router") or {}, settings.ROUTER_SETTINGS)
+    if rerrs:
+        errors["router"] = rerrs
+    if errors:
+        return 400, {"error": "Some values are not valid", "errors": errors}
+    rebuild = []
+    for r, clean in plans:
+        p = repo_cfg_path(r)
+        text = p.read_text(encoding="utf-8") if p.exists() else ""
+        before = settings.load(yaml.safe_load(text) or {})
+        for k, v in clean.items():
+            text = set_yaml_key(text, k, v)
+        p.write_text(text, encoding="utf-8")
+        after = settings.load(yaml.safe_load(text) or {})
+        if any(before[k] != after[k] for k in settings.CREATION_KEYS):
+            rebuild.append(r["name"])
+    if rclean:
+        text = ORCH_CFG.read_text(encoding="utf-8")
+        for k, v in rclean.items():
+            text = set_yaml_key(text, k, v)
+        ORCH_CFG.write_text(text, encoding="utf-8")
+    WORKER.stop()                                      # the query field picks the new values up
+    GRAPH.reset()
+    return 200, {"saved": True, "rebuild_needed": rebuild}
+
+
+def job_model_path(body):
+    """Use a model folder in place (text path). Every file is hash-checked first; then the
+    VS Code configuration is regenerated so the servers use it. Empty path = the bundled model."""
+    def run(job):
+        raw = str(body.get("path", "")).strip()
+        folder = Path(raw).expanduser().resolve() if raw else settings.model_dir(FW, {})
+        problem = model_problem(folder)
+        if problem:
+            raise RuntimeError(f"{folder}: {problem}")
+        text = ORCH_CFG.read_text(encoding="utf-8")
+        ORCH_CFG.write_text(set_yaml_key(text, "model_path", str(folder) if raw else None), encoding="utf-8")
+        job.log(f"✓ model folder: {folder} (all files match their fingerprints)")
+        if configured_repos():
+            if stream(job, [sys.executable, FW / "orchestrator" / "setup.py"]) != 0:
+                raise RuntimeError("regenerating the VS Code configuration failed")
+            job.log("✓ VS Code configuration updated — reload VS Code")
+        WORKER.stop()
+        GRAPH.reset()
+        return {"model_dir": str(folder)}
+    return run
+
+
 def job_verify(job):
     p = subprocess.Popen([sys.executable, str(GUI / "verify.py")], stdout=subprocess.PIPE, stderr=subprocess.PIPE,
                          text=True, bufsize=1)
@@ -401,7 +513,8 @@ def list_dir(path: str) -> dict:
         return {"path": "This PC", "parent": None, "git": False, "pickable": False,
                 "dirs": [{"name": d, "path": d, "git": False} for d in drives]}
     p = Path(path or Path.home()).expanduser().resolve()
-    if not p.is_dir():
+    found = p.is_dir()
+    if not found:
         p = Path.home()
     dirs = []
     try:
@@ -415,7 +528,8 @@ def list_dir(path: str) -> dict:
         except OSError:                  # unreadable entries (Windows junctions, permissions) are skipped
             continue
     parent = str(p.parent) if p.parent != p else (DRIVES if WIN else None)
-    return {"path": str(p), "parent": parent, "dirs": dirs, "git": (p / ".git").exists(), "pickable": True}
+    return {"path": str(p), "parent": parent, "dirs": dirs, "git": (p / ".git").exists(), "pickable": True,
+            "found": found}
 
 
 # ── HTTP ──────────────────────────────────────────────────────────────────────
@@ -482,6 +596,8 @@ class Handler(BaseHTTPRequestHandler):
                 except ValueError as e:
                     return self._send(404, {"error": str(e)})
                 return self._send(404, {"error": "not found"})
+            if u.path == "/api/settings":
+                return self._send(200, get_settings())
             if u.path == "/api/results":
                 return self._send(200, {"results": list_results(), "dir": str(RESULTS)})
             if u.path == "/api/result":
@@ -513,6 +629,11 @@ class Handler(BaseHTTPRequestHandler):
                 return self._send(200, {"job": start_job("Install", job_install)})
             if u.path == "/api/model":
                 return self._send(200, {"job": start_job("Model", job_model(body))})
+            if u.path == "/api/model_path":
+                return self._send(200, {"job": start_job("Model folder", job_model_path(body))})
+            if u.path == "/api/settings":
+                code, out = save_settings(body)
+                return self._send(code, out)
             if u.path == "/api/scan":
                 return self._send(200, {"repos": scan(body["repos"])})
             if u.path == "/api/configure":

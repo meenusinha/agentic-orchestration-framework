@@ -51,7 +51,8 @@ def main():
     os.environ.setdefault("DEMO_LOG_FILE", str(Path.home() / ".agentic-orchestration" / "logs" /
                                               "mcp-orchestration.log"))
     from repo_rag import RepoRAG
-    model = FW / "models" / "granite-embedding-small-english-r2"
+    from codegraph import settings
+    model = settings.model_dir(FW, cfg)
     peers = [{"name": r["name"], "path": str(Path(r["path"]).expanduser())} for r in repos]
     rags, stats = {}, {}
     for p in (1, 2):
@@ -60,14 +61,10 @@ def main():
             rc = yaml.safe_load((root / "mcp" / "config.yaml").read_text()) if (root / "mcp" / "config.yaml").exists() else {}
             emit(event="progress", msg=("Building" if p == 1 else "Linking") + f" {r['name']} …")
             if r["name"] not in rags:
-                roots = []
-                for key, default in (("src_path", "."), ("knowledge_path", "./knowledge")):
-                    v = rc.get(key, default)
-                    for x in (v if isinstance(v, list) else [v] if v else []):
-                        roots.append((root / x).resolve())
-                rags[r["name"]] = RepoRAG(r["name"], str(root), roots, embedding_model=str(model),
+                rags[r["name"]] = RepoRAG(r["name"], str(root), settings.roots(root, rc), embedding_model=str(model),
                                           file_types=rc.get("file_types"), structure=rc.get("structure"),
-                                          extra_extensions=rc.get("extra_extensions"), peers=peers)
+                                          extra_extensions=rc.get("extra_extensions"), peers=peers,
+                                          **settings.rag_kwargs(rc))
             stats[r["name"]] = rags[r["name"]].build_or_load_index()
     out, imap = [], {}
     for r in repos:

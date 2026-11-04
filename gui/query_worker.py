@@ -50,23 +50,19 @@ def out(obj):
 def load():
     import yaml
     from repo_rag import RepoRAG
+    from codegraph import settings
     cfg = yaml.safe_load((FW / "orchestrator" / "mcp" / "config.yaml").read_text()) or {}
     repos = [r for r in cfg.get("repos") or [] if not str(r.get("path", "")).startswith("/absolute/path/to/")]
     peers = [{"name": r["name"], "path": str(Path(r["path"]).expanduser())} for r in repos]
-    model = FW / "models" / "granite-embedding-small-english-r2"
+    model = settings.model_dir(FW, cfg)
     rags = {}
     for r in repos:
         root = Path(r["path"]).expanduser()
         rc_path = root / "mcp" / "config.yaml"
         rc = yaml.safe_load(rc_path.read_text()) if rc_path.exists() else {}
-        roots = []
-        for key, default in (("src_path", "."), ("knowledge_path", "./knowledge")):
-            v = rc.get(key, default)
-            for x in (v if isinstance(v, list) else [v] if v else []):
-                roots.append((root / x).resolve())
-        rag = RepoRAG(r["name"], str(root), roots, embedding_model=str(model), file_types=rc.get("file_types"),
-                      structure=rc.get("structure"), extra_extensions=rc.get("extra_extensions"), peers=peers,
-                      top_k=rc.get("top_k", 5), budget_tokens=rc.get("result_budget_tokens", 6000))
+        rag = RepoRAG(r["name"], str(root), settings.roots(root, rc), embedding_model=str(model),
+                      file_types=rc.get("file_types"), structure=rc.get("structure"),
+                      extra_extensions=rc.get("extra_extensions"), peers=peers, **settings.rag_kwargs(rc))
         rag.build_or_load_index()
         rags[r["name"]] = rag
     return rags
@@ -77,7 +73,7 @@ def q_search(rags, text, repo):
     targets = [repo] if repo else list(rags)
     per_repo, ifaces = [], {}
     for name in targets:
-        res = rags[name].search_code(text, k=4)
+        res = rags[name].search_code(text)            # k = the repository's top_k setting
         hits = []
         for r in res["results"]:
             hits.append({"node": r["node"], "parent": r.get("parent"), "relations": r.get("relations", {}),

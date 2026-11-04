@@ -86,7 +86,9 @@ except ImportError:
 ORCHESTRATOR_DIR = Path(__file__).parent.resolve()
 FRAMEWORK_DIR    = ORCHESTRATOR_DIR.parent
 MODEL_NAME       = "granite-embedding-small-english-r2"
-MODEL_PATH       = str(FRAMEWORK_DIR / "models" / MODEL_NAME)
+_CFG_FOR_MODEL   = yaml.safe_load((ORCHESTRATOR_DIR / "mcp" / "config.yaml").read_text()) or {}
+_custom_model    = str(_CFG_FOR_MODEL.get("model_path") or "").strip()    # set on the setup page
+MODEL_PATH       = str(Path(_custom_model).expanduser() if _custom_model else FRAMEWORK_DIR / "models" / MODEL_NAME)
 DEFAULT_LOG_FILE = "~/.agentic-orchestration/logs/mcp-orchestration.log"
 INDEX_DIR_NAME   = ".rag_index"
 CONFIG_PATH      = ORCHESTRATOR_DIR / "mcp" / "config.yaml"

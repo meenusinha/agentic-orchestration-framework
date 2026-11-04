@@ -231,7 +231,8 @@ print()
 print(term.c("Step 1", term.CYN) + " — Orchestrator routing...")
 router = OrchestratorRouter(CONFIG_PATH)
 requesting_repo = repos[0]["name"]
-targets, scores = router.get_relevant_repos(requesting_repo, feature_request)
+targets, scores = router.get_relevant_repos(requesting_repo, feature_request,
+                                          top_k=router.router_settings["router_top_repos"])
 repo_display = {r["name"]: r.get("display_name", r["name"]) for r in repos}
 print(f"  Selected: {term.c(str(targets), term.GRN)}\n")
 

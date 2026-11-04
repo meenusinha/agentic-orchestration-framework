@@ -12,6 +12,7 @@ small change only embeds what changed.
 """
 from __future__ import annotations
 
+import fnmatch
 import hashlib
 import json
 import os
@@ -58,7 +59,7 @@ _KNOWN_DATA_EXT = {".json", ".yaml", ".yml", ".toml", ".ini", ".cfg", ".conf", "
 class IndexConfig:
     def __init__(self, repo_name: str, repo_root: Path, roots: list[Path], file_types: dict | None = None,
                  structure: list | None = None, extra_extensions: list | None = None, peers: list | None = None,
-                 max_file_bytes: int = 2_000_000):
+                 max_file_bytes: int = 2_000_000, exclude: list | None = None):
         self.repo_name, self.repo_root = repo_name, Path(repo_root).resolve()
         self.roots = [Path(r).resolve() for r in roots]
         self.file_types = {k.lower() if k.startswith(".") else k: v for k, v in (file_types or {}).items()}
@@ -67,12 +68,23 @@ class IndexConfig:
         self.structure = structure or []
         self.peers = peers or []                         # [{"name":…, "path":…}]
         self.max_file_bytes = max_file_bytes
+        self.exclude = [e.replace("\\", "/").strip("/") for e in (exclude or []) if e.strip()]
 
     def fingerprint(self, model_sha: str) -> str:
         return hashlib.sha256(json.dumps({
             "format": INDEX_FORMAT, "code": _code_version(), "model": model_sha,
             "roots": [str(r) for r in self.roots],
-            "file_types": self.file_types, "structure": self.structure}, sort_keys=True).encode()).hexdigest()
+            "file_types": self.file_types, "structure": self.structure, "exclude": self.exclude,
+            "max_file_bytes": self.max_file_bytes}, sort_keys=True).encode()).hexdigest()
+
+    def excluded(self, rel: str) -> bool:
+        """rel matches an exclude glob, or lies inside a folder that does (build/** or build)."""
+        parts = rel.split("/")
+        for pat in self.exclude:
+            if fnmatch.fnmatch(rel, pat) or any(fnmatch.fnmatch("/".join(parts[:i]), pat.rstrip("/*").rstrip("/") or pat)
+                                                for i in range(1, len(parts))):
+                return True
+        return False
 
 
 def _code_version() -> str:
@@ -102,6 +114,8 @@ def collect_files(cfg: IndexConfig):
                 if rel in seen:
                     continue
                 seen.add(rel)
+                if cfg.excluded(rel):
+                    continue
                 if is_secret_file(ab):
                     secrets += 1
                     continue

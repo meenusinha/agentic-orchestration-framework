@@ -89,7 +89,8 @@ def get_relevant_repos(requesting_repo: str, feature_description: str) -> str:
     log("orchestrator_router", "TOOL_CALL", f"get_relevant_repos from '{requesting_repo}'")
     log("orchestrator_router", "TOOL_CALL", f"Feature: {content(feature_description[:80])}")
 
-    targets, all_scores = router.get_relevant_repos(requesting_repo, feature_description, top_k=2)
+    targets, all_scores = router.get_relevant_repos(requesting_repo, feature_description,
+                                                     top_k=router.router_settings["router_top_repos"])
 
     lines = [
         f"Routing result for: '{feature_description[:70]}...'",

@@ -106,6 +106,12 @@ class OrchestratorRouter:
             self._repo_paths = getattr(self, "_repo_paths", {})
             self._repo_paths[name] = repo_path
         self._embed = None
+        fw = Path(__file__).resolve().parents[2] / "repo-agent" / "mcp"
+        if str(fw) not in sys.path:
+            sys.path.insert(0, str(fw))
+        from codegraph import settings as _settings
+        self._settings = _settings
+        self.router_settings = _settings.load(config, _settings.ROUTER_SETTINGS)
 
         log("orchestrator_router", "INFO",
             f"Router ready — will query {len(self._repo_mcp_scripts)} repo MCP servers")
@@ -172,9 +178,15 @@ class OrchestratorRouter:
                     scores[name] = _score_response(resp)
                     self.last_reasons.setdefault(name, []).append("scored by query_repo (no index yet)")
                 continue
-            gs = GraphSearch(store, name, lambda _q: q, peers=[])
+            rcp = self._repo_paths[name] / "mcp" / "config.yaml"
+            try:
+                rs = self._settings.load(yaml.safe_load(rcp.read_text()) if rcp.exists() else {})
+            except (OSError, yaml.YAMLError):
+                rs = self._settings.load({})
+            gs = GraphSearch(store, name, lambda _q: q, peers=[], candidate_pool=rs["candidate_pool"],
+                             rrf_k=rs["rrf_k"], role_weights=rs["role_weights"])   # that repo's own settings
             best = float((gs.mat @ q).max()) if len(gs.uids) else 0.0
-            hits = gs.search(feature, k=6)
+            hits = gs.search(feature, k=self.router_settings["router_hits_per_repo"])
             if name == requesting_repo:
                 frontier, seen = [u for u, _ in hits], set()
                 for _ in range(2):                  # matched code + its callers (2 levels): a C helper

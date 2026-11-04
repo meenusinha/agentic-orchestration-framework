@@ -26,7 +26,6 @@ def _ignore_foreign_pythonpath():
 _ignore_foreign_pythonpath()
 
 
-import glob as _glob
 import json
 import time
 from pathlib import Path
@@ -88,33 +87,13 @@ DISPLAY     = _cfg.get("display_name", REPO_NAME)
 
 REPO_ROOT   = Path(__file__).parent.parent.resolve()
 
-def _resolve(p: str) -> Path:
-    path = Path(p)
-    return path if path.is_absolute() else (REPO_ROOT / path).resolve()
+from codegraph import settings as _settings   # one definition of every setting and default
 
-def _expand_paths(raw, default: str = None) -> list[Path]:
-    """Resolve a path config value to a list of concrete directories, expanding glob patterns."""
-    if raw is None:
-        raw = default
-    if raw is None:
-        return []
-    entries = raw if isinstance(raw, list) else [raw]
-    result = []
-    for entry in entries:
-        if any(c in str(entry) for c in ("*", "?", "[")):
-            matches = _glob.glob(str(REPO_ROOT / entry), recursive=True)
-            result.extend(Path(m) for m in sorted(matches) if Path(m).is_dir())
-        else:
-            result.append(_resolve(str(entry)))
-    return result
-
-SRC_DIRS       = _expand_paths(_cfg.get("src_path"))
-KNOWLEDGE_DIRS = _expand_paths(_cfg.get("knowledge_path"), default="./knowledge")
-EXTRA_EXT      = _cfg.get("extra_extensions") or []
-FILE_TYPES     = _cfg.get("file_types") or {}         # developer's answers for unknown extensions
-STRUCTURE      = _cfg.get("structure") or []          # folder → role manifest
-TOP_K          = _cfg.get("top_k", 5)
-BUDGET         = _cfg.get("result_budget_tokens", 6000)
+ROOTS       = _settings.roots(REPO_ROOT, _cfg)              # src_path + knowledge_path, like every builder
+EXTRA_EXT   = _cfg.get("extra_extensions") or []
+FILE_TYPES  = _cfg.get("file_types") or {}         # developer's answers for unknown extensions
+STRUCTURE   = _cfg.get("structure") or []          # folder → role manifest
+SETTINGS    = _settings.load(_cfg)
 # Local folder only — no default, so a missing setting can never trigger a download
 EMBEDDING_MODEL = os.environ.get("EMBEDDING_MODEL_PATH", "")
 try:                                                  # connected repos, written by setup.py
@@ -125,13 +104,13 @@ except ValueError:
 # ── Build / load the code graph ───────────────────────────────────────────────
 log(REPO_NAME, "INFO", f"Starting {DISPLAY} MCP server")
 rag = RepoRAG(
-    repo_name=REPO_NAME, repo_root=str(REPO_ROOT), roots=SRC_DIRS + KNOWLEDGE_DIRS,
+    repo_name=REPO_NAME, repo_root=str(REPO_ROOT), roots=ROOTS,
     embedding_model=EMBEDDING_MODEL, file_types=FILE_TYPES, structure=STRUCTURE,
-    extra_extensions=EXTRA_EXT, peers=PEERS, top_k=TOP_K, budget_tokens=BUDGET,
+    extra_extensions=EXTRA_EXT, peers=PEERS, **_settings.rag_kwargs(_cfg),
 )
 rag.build_or_load_index()
 _last_refresh = time.monotonic()
-_REFRESH_EVERY = 60.0
+_REFRESH_EVERY = float(SETTINGS["refresh_seconds"])
 
 
 def _fresh():
@@ -165,7 +144,7 @@ def query_repo(feature_request: str) -> str:
 
 @mcp.tool()
 def search_code(query: Annotated[str, Field(description="What you are looking for, in plain words or symbol names")],
-                k: Annotated[int, Field(ge=1, le=20, description="Max results")] = 5) -> SearchResult:
+                k: Annotated[int | None, Field(ge=1, le=20, description="Max results (default: the repository's top_k setting)")] = None) -> SearchResult:
     """
     Structured search over this repo's code graph. Each result is one whole unit (never
     cut): `node` (id, kind, qualname, file, lines, role, process, text), `parent` (the

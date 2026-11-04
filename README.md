@@ -26,13 +26,14 @@ You can also run the same searches yourself in a local web page, without Copilot
 4. [Use it in VS Code with Copilot](#use-it-in-vs-code-with-copilot)
 5. [Search without Copilot: queries and the knowledge graph](#search-without-copilot)
 6. [What gets indexed](#what-gets-indexed)
-7. [Day-to-day operation](#day-to-day-operation)
-8. [Files the framework adds to your repositories](#files-the-framework-adds-to-your-repositories)
-9. [Command-line alternative](#command-line-alternative)
-10. [Testing](#testing)
-11. [Security](#security)
-12. [Troubleshooting](#troubleshooting)
-13. [License](#license)
+7. [Settings](#settings)
+8. [Day-to-day operation](#day-to-day-operation)
+9. [Files the framework adds to your repositories](#files-the-framework-adds-to-your-repositories)
+10. [Command-line alternative](#command-line-alternative)
+11. [Testing](#testing)
+12. [Security](#security)
+13. [Troubleshooting](#troubleshooting)
+14. [License](#license)
 
 ---
 
@@ -96,7 +97,7 @@ browser. It runs on `127.0.0.1` only and is protected by a one-time token. Six s
 |---|---|
 | **1. Install** | Click **Install**. The hash-locked packages go into `.venv`; nothing is installed into your system Python |
 | **2. Model** | Nothing to do: the included model is checked file by file against its pinned fingerprints (see [Model integrity](#model-integrity-hash-pinning)) and the step completes by itself. Only if `models/` is missing does it ask you to point to another copy |
-| **3. Repositories** | Add each repository to connect, at least two. Either **Choose folder…** for a repository you've already cloned, or **Clone from Git**: enter the URL and branch and choose the folder to clone into. If that folder already holds a clone of the same repository, it's updated and switched to the branch instead |
+| **3. Repositories** | Add each repository to connect, at least two. Either type its folder path (or **Choose folder…**) for a repository you've already cloned, or **Clone from Git**: enter the URL and branch and choose the folder to clone into. If that folder already holds a clone of the same repository, it's updated and switched to the branch instead |
 | **4. Review** | Check what the scan found: languages, processes and libraries, IDL interfaces and the role of each folder. If a file type is unknown, say what it contains (implementation, interface, configuration, …) and which language to read it as |
 | **5. Configure** | Click **Configure**. This writes the VS Code configuration into each repository (see [Files the framework adds](#files-the-framework-adds-to-your-repositories)) |
 | **6. Create GraphRAG** | Click **Yes, create the GraphRAG**. The first build takes a few minutes per large repository. The page then shows which processes serve and call each IDL interface |
@@ -159,6 +160,49 @@ from other repositories. Search results have a **show in graph** link.
 | Documentation | Markdown, by heading section |
 | Never indexed | Secret-store files (`.env`, keys, keystores, credential files); dependency, build-output and cache folders. Secret-looking values elsewhere are replaced with `[REDACTED]` |
 
+## Settings
+
+The setup page has a **Settings** page (left menu, under Explore) for how the GraphRAG is
+created and how queries behave. Every field shows its default and allowed range. Choose a
+repository, or tick **apply to all repositories**, then **Save**. **Reset to defaults**
+fills in the defaults.
+
+| Group | Setting | Default | Range |
+|---|---|---|---|
+| **GraphRAG creation** (per repository) | Folders to index (`src_path`) | `.` (the whole repository) | paths |
+| | Extra documentation folders (`knowledge_path`) | `./knowledge` | paths |
+| | Exclude (`exclude`) | none | globs, e.g. `build/**`, `*.generated.c` |
+| | Extra file extensions indexed as text (`extra_extensions`) | none | e.g. `.tmpl` |
+| | Maximum file size (`max_file_kb`) | 2000 KB | 10–50000 |
+| | Embedding batch size (`embed_batch_size`) | 64 | 1–512 |
+| | Change check interval (`refresh_seconds`) | 60 s | 10–3600 |
+| **Queries** (per repository) | Results per search (`top_k`) | 5 | 1–20 |
+| | Answer size budget (`result_budget_tokens`) | 6000 | 500–100000 |
+| | Candidates from vector and from keyword search (`candidate_pool`) | 60 | 10–500 |
+| | Rank-fusion constant (`rrf_k`) | 60 | 1–1000 |
+| | Impact analysis depth, in caller levels (`impact_depth`) | 2 | 1–5 |
+| | Ranking weight per folder role (`role_weights`) | interface 1.15 · implementation, internal, library, docs, config 1.0 · tooling 0.85 · example 0.7 · external, build 0.6 · generated 0.5 · test 0 | 0–3 each |
+| **Router** (all repositories) | Repositories picked per request (`router_top_repos`) | 2 | 1–10 |
+| | Search hits per repository used for routing (`router_hits_per_repo`) | 6 | 1–50 |
+
+- **Creation settings** take effect when the GraphRAG is rebuilt. After saving, the page
+  offers **Rebuild GraphRAG now**.
+- **Query and router settings** apply to the query field at once, and to Copilot after
+  reloading VS Code.
+- The values are stored in each repository's `mcp/config.yaml` and in the framework's
+  `orchestrator/mcp/config.yaml`; you can also edit them there. Saving from the page keeps
+  the files' comments.
+
+### Typing paths
+
+Every path can be typed or pasted, as well as chosen with **Browse…**:
+
+- **Model folder** (step 2): type the path of a folder holding the approved model and click
+  **Use this folder**. It's used where it is, nothing is copied, after every file is checked
+  against its fingerprint. **Use the included model instead** switches back.
+- **Repositories** (step 3): type a repository's folder path and click **Add**, or type the
+  folder to clone into.
+
 ---
 
 ## Day-to-day operation
@@ -168,6 +212,7 @@ from other repositories. Search results have a **show in graph** link.
 | Code or docs changed | Nothing. The servers check for changes at most once a minute and update the graph, re-embedding only what changed |
 | Add or remove a repository | Run `python3 setup_gui.py`, go to **Repositories**, then **Review**, **Configure** and **Create GraphRAG**. Reload VS Code afterwards |
 | Change a folder role or file type | Same as above; the graph rebuilds |
+| Change creation or query settings | **Settings** page (see [Settings](#settings)) |
 | Force a full rebuild | Delete `<repo>/.rag_index/`; it's rebuilt on the next start |
 | Remove all derived data | Delete `<repo>/.rag_index/` in each repository and `results/` in the framework folder |
 | Logs | `~/.agentic-orchestration/logs/` (private; code text is hidden unless `log_content: true` in `orchestrator/mcp/config.yaml`) |

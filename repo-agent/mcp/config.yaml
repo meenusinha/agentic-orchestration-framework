@@ -36,7 +36,29 @@ file_types: {}
 #   - {path: "api/**", role: interface}
 structure: []
 
+# ── GraphRAG creation ── (changing these rebuilds the graph on the next start)
+# Paths never indexed, as globs inside the repository, e.g. [build/**, "*.generated.c"]
+exclude: []
+# Files larger than this are skipped (KB)
+max_file_kb: 2000
+# Units embedded per batch (higher = faster, more memory)
+embed_batch_size: 64
+# How often a server checks for changed files (seconds)
+refresh_seconds: 60
+
+# ── Queries ──
 # Results per search, and the token budget for one answer. Units are always whole:
 # a unit that does not fit is listed under "more" (fetch with get_node), never cut.
 top_k: 5
 result_budget_tokens: 6000
+# Candidates taken from vector search and from keyword search before they are combined
+candidate_pool: 60
+# Rank-fusion constant: score = sum of 1 / (rrf_k + rank); lower = top ranks count more
+rrf_k: 60
+# Caller levels followed by impact analysis
+impact_depth: 2
+# Ranking weight per folder role (0 = never returned; tests are used only as evidence)
+role_weights: {interface: 1.15, implementation: 1.0, internal: 1.0, library: 1.0, docs: 1.0, tooling: 0.85,
+  example: 0.7, external: 0.6, generated: 0.5, build: 0.6, config: 1.0, test: 0.0}
+
+# All of the above can also be changed on the setup page (Settings).

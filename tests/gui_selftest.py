@@ -44,6 +44,7 @@ import argparse
 import json
 import re
 import subprocess
+import shutil
 import tempfile
 import threading
 import time
@@ -440,7 +441,56 @@ def _run(a):
               g.call("/api/graph/children?repo=sample-server&node=" + q("x' OR 1=1 --"))[0] == 404 and
               g.call("/api/graph/children?repo=nope&node=")[0] == 404)
 
-        print("\n12. Restart: the GUI opens on the queries", flush=True)
+        print("\n12. Settings, typed paths, model folder in place", flush=True)
+        code, st0 = g.call("/api/settings")
+        srv0 = next((x for x in st0.get("repos", []) if x["name"] == "sample-server"), {})
+        check("settings: every value has a default, and defaults apply",
+              code == 200 and srv0.get("values", {}).get("top_k") == 5 and st0["router"]["router_top_repos"] == 2
+              and all("default" in x for x in st0["spec"]), f"{len(st0.get('spec', []))} repository settings")
+        code, bad = g.call("/api/settings", {"repos": {"sample-server": {"top_k": 0, "exclude": ["../outside"]}}})
+        check("settings: invalid values are refused with the reason", code == 400 and "sample-server" in bad.get("errors", {}),
+              "; ".join(bad.get("errors", {}).get("sample-server", []))[:90])
+        cfgp = Path(res["repos"][0]) / "mcp" / "config.yaml"
+        code, saved = g.call("/api/settings", {"repos": {"sample-server": {"top_k": 3, "result_budget_tokens": 4000,
+                                                                            "exclude": ["third_party/**"]}},
+                                               "router": {"router_top_repos": 1}})
+        text = cfgp.read_text(encoding="utf-8")
+        check("settings: saved, with the config file's comments kept",
+              code == 200 and "top_k: 3" in text and "exclude: [third_party/**]" in text and "# Results per search" in text)
+        check("settings: a creation change asks for a rebuild", saved.get("rebuild_needed") == ["sample-server"],
+              str(saved.get("rebuild_needed")))
+        ok, lines, _ = g.job("/api/verify", {})
+        tree = g.call("/api/graph/children?repo=sample-server&node=")[1].get("children", [])
+        check("rebuild applies the creation settings (third_party/ excluded)", ok and "third_party/" not in
+              [c["name"] for c in tree] and "src/" in [c["name"] for c in tree])
+        code, rq = g.call("/api/query", {"mode": "search", "text": "password policy strength check"})
+        n_srv = next((len(x["hits"]) for x in rq.get("result", {}).get("repos", []) if x["repo"] == "sample-server"), -1)
+        check("query settings apply (top_k 3 for sample-server)", code == 200 and 0 < n_srv <= 3, f"{n_srv} results")
+        g.call("/api/settings", {"repos": {"sample-server": {"top_k": 5, "result_budget_tokens": 6000, "exclude": []}},
+                                 "router": {"router_top_repos": 2}})
+        g.job("/api/verify", {})
+        check("typed paths: an existing folder is found, a missing one is reported",
+              g.call("/api/fs?path=" + q(str(pg_dir)))[1].get("found") is True and
+              g.call("/api/fs?path=" + q(str(pg_dir / "no-such-folder")))[1].get("found") is False)
+        elsewhere = Path(tempfile.mkdtemp(prefix="ao-model-elsewhere-")) / "granite"
+        shutil.copytree(a.model_from, elsewhere)
+        ok, lines, _ = g.job("/api/model_path", {"path": str(elsewhere)})
+        st = g.call("/api/state")[1]
+        check("model folder used in place from a typed path (hash-checked, not copied)",
+              ok and st.get("model_ok") and st.get("model_custom") and Path(st["model_dir"]) == elsewhere.resolve(),
+              st.get("model_dir", "")[-60:])
+        mcpj = json.loads((Path(res["repos"][1]) / ".vscode" / "mcp.json").read_text(encoding="utf-8"))
+        check("VS Code configuration points the servers at that folder",
+              all(v["env"].get("EMBEDDING_MODEL_PATH") == str(elsewhere.resolve()) for v in mcpj["servers"].values()))
+        (elsewhere / "config.json").write_text("{}", encoding="utf-8")
+        ok, lines, _ = g.job("/api/model_path", {"path": str(elsewhere)})
+        check("a changed model folder is refused when typed in", not ok and "config.json" in (lines[-1] if lines else ""),
+              (lines[-1] if lines else "")[-80:])
+        ok, lines, _ = g.job("/api/model_path", {"path": ""})
+        st = g.call("/api/state")[1]
+        check("back to the included model", ok and st.get("model_ok") and not st.get("model_custom"))
+
+        print("\n13. Restart: the GUI opens on the queries", flush=True)
         g.call("/api/quit", {})
         proc.wait(timeout=30)
         proc, url = start_gui(env)

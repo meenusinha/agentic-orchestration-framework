@@ -69,8 +69,11 @@ class PeerView:
 
 
 class GraphSearch:
-    def __init__(self, store: Store, repo: str, embed_query, peers: list[dict] | None = None):
+    def __init__(self, store: Store, repo: str, embed_query, peers: list[dict] | None = None,
+                 candidate_pool: int = 60, rrf_k: int = 60, role_weights: dict | None = None):
         self.s, self.repo, self.embed_query = store, repo, embed_query
+        self.pool, self.rrf_k = candidate_pool, rrf_k
+        self.role_weight = dict(_ROLE_WEIGHT, **(role_weights or {}))
         self.peers = {p["name"]: PeerView(p["name"], p["path"]) for p in (peers or []) if p.get("name") != repo}
         self.uids, self.mat = store.load_vectors()
         self.meta = {r[0]: (r[1], r[2], r[3]) for r in
@@ -82,15 +85,15 @@ class GraphSearch:
         if len(self.uids):
             q = np.asarray(self.embed_query(query), dtype=np.float32)
             scores = self.mat @ q
-            top = np.argsort(-scores)[:60]
+            top = np.argsort(-scores)[:self.pool]
             for rank, i in enumerate(top):
-                fused[self.uids[i]] = fused.get(self.uids[i], 0) + 1.0 / (60 + rank)
-        for rank, (uid, _) in enumerate(self.s.keyword(query, limit=60)):
-            fused[uid] = fused.get(uid, 0) + 1.0 / (60 + rank)
+                fused[self.uids[i]] = fused.get(self.uids[i], 0) + 1.0 / (self.rrf_k + rank)
+        for rank, (uid, _) in enumerate(self.s.keyword(query, limit=self.pool)):
+            fused[uid] = fused.get(uid, 0) + 1.0 / (self.rrf_k + rank)
         ranked = []
         for uid, sc in fused.items():
             role, kind, _ = self.meta.get(uid, ("", "", ""))
-            w = _ROLE_WEIGHT.get(role, 1.0)
+            w = self.role_weight.get(role, 1.0)
             if w == 0 or kind == FILE:
                 continue
             ranked.append((uid, sc * w))

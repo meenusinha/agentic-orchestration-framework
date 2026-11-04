@@ -447,7 +447,9 @@ def main() -> None:
     framework = Path(args.framework).expanduser().resolve()
     if not (framework / "orchestrator" / "setup.py").exists():
         raise SystemExit(f"ERROR: {framework} is not the framework folder (orchestrator/setup.py not found)")
-    model_dir  = framework / "models" / MODEL_DIRNAME
+    _orch = yaml.safe_load((framework / "orchestrator" / "mcp" / "config.yaml").read_text()) or {}
+    _custom = str(_orch.get("model_path") or "").strip()            # a model folder used in place
+    model_dir  = Path(_custom).expanduser() if _custom else framework / "models" / MODEL_DIRNAME
     model_from = Path(args.model_from).expanduser().resolve() if args.model_from else None
 
     if args.model_only:                                 # just put the model in place (setup GUI)

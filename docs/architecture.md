@@ -32,6 +32,7 @@ Supported platforms: **Windows and Linux**.
 | `store.py` | SQLite graph store |
 | `search.py` | Hybrid ranking (vectors + keywords), interface tracing, impact analysis, whole-unit result assembly |
 | `security.py` | Secret-file exclusion and redaction |
+| `settings.py` | Every creation, query and router setting with its default and range; used by every program that builds or searches a graph, so they always build identical graphs |
 
 ---
 
