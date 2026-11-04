@@ -15,12 +15,10 @@ Usage:
 Exit code 0 = every check passed. Run it on every change and on a schedule (for example
 weekly), so new advisories for unchanged pins are noticed.
 """
-import argparse
+
 import os
-import subprocess
 import sys
-import tempfile
-from pathlib import Path
+
 
 def _ignore_foreign_pythonpath():
     """Use only this environment's packages. PYTHONPATH/PYTHONHOME set for other tools would be
@@ -37,6 +35,12 @@ def _ignore_foreign_pythonpath():
 
 _ignore_foreign_pythonpath()
 
+
+import argparse
+import subprocess
+import tempfile
+from pathlib import Path
+
 for _s in (sys.stdout, sys.stderr):      # consoles and pipes may default to a legacy code page
     if hasattr(_s, "reconfigure"):
         _s.reconfigure(encoding="utf-8", errors="replace")
@@ -48,7 +52,8 @@ def make_foreign_pythonpath() -> str:
     """A folder of fake packages that fail on import, like another tool's libraries built for a
     different Python. The tests put it on PYTHONPATH: the framework must never import from it."""
     d = Path(tempfile.mkdtemp(prefix="ao-foreign-pythonpath-"))
-    for pkg in ("numpy", "yaml", "mcp", "torch", "pydantic"):
+    # third-party names, plus standard-library names that old library folders often shadow
+    for pkg in ("numpy", "yaml", "mcp", "torch", "pydantic", "pathlib", "enum", "typing", "argparse", "json"):
         (d / pkg).mkdir()
         (d / pkg / "__init__.py").write_text(
             "raise ImportError('foreign PYTHONPATH was used: undefined symbol: _Py_ZeroStruct')\n")

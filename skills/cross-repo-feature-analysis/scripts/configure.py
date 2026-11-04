@@ -31,13 +31,10 @@ Run it with the framework venv's Python so the generated configs pin it:
   <framework>/.venv/bin/python configure.py --framework <framework> \\
       --repo /abs/path/frontend --repo backend=/abs/path/api --src backend=./app
 """
-import argparse
+
 import os
-import re
-import shutil
-import subprocess
 import sys
-from pathlib import Path
+
 
 def _ignore_foreign_pythonpath():
     """Use only this environment's packages. PYTHONPATH/PYTHONHOME set for other tools would be
@@ -53,6 +50,13 @@ def _ignore_foreign_pythonpath():
 
 
 _ignore_foreign_pythonpath()
+
+
+import argparse
+import re
+import shutil
+import subprocess
+from pathlib import Path
 
 for _s in (sys.stdout, sys.stderr):      # Windows consoles/pipes default to cp1252, which cannot print ✓ — … etc.
     if hasattr(_s, "reconfigure"):

@@ -1,13 +1,11 @@
 #!/usr/bin/env python3
 """Smoke test for the sample repositories: start the repo MCP servers exactly as the generated
 VS Code config says and check the cross-repo results. Usage: smoke_test.py <sample-client>/.vscode/mcp.json"""
-import asyncio
-import json
-import sys
-import time
-from pathlib import Path
 
 import os
+import sys
+
+
 def _ignore_foreign_pythonpath():
     """Use only this environment's packages. PYTHONPATH/PYTHONHOME set for other tools would be
     searched before the virtual environment, and their libraries (possibly built for another
@@ -22,6 +20,12 @@ def _ignore_foreign_pythonpath():
 
 
 _ignore_foreign_pythonpath()
+
+
+import asyncio
+import json
+import time
+from pathlib import Path
 
 from mcp import ClientSession, StdioServerParameters
 from mcp.client.stdio import stdio_client

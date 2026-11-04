@@ -18,14 +18,11 @@ indexed. For each repo it prints:
 Usage:
   <framework>/.venv/bin/python scan.py --framework <framework> /abs/repo-a [name=]/abs/repo-b …
 """
-import argparse
-import collections
-import re
-import shlex
-import sys
-from pathlib import Path, PurePosixPath
 
 import os
+import sys
+
+
 def _ignore_foreign_pythonpath():
     """Use only this environment's packages. PYTHONPATH/PYTHONHOME set for other tools would be
     searched before the virtual environment, and their libraries (possibly built for another
@@ -40,6 +37,13 @@ def _ignore_foreign_pythonpath():
 
 
 _ignore_foreign_pythonpath()
+
+
+import argparse
+import collections
+import re
+import shlex
+from pathlib import Path, PurePosixPath
 
 for _s in (sys.stdout, sys.stderr):      # Windows consoles/pipes default to cp1252, which cannot print ✓ — … etc.
     if hasattr(_s, "reconfigure"):

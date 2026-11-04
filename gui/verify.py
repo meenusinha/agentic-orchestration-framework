@@ -5,10 +5,10 @@ Prints JSON lines: {"event": "progress", "msg": ...} while working, then one
 {"event": "result", ...} with per-repo stats and the cross-repo interface map.
 Two passes: the first builds each graph and publishes its IDL interfaces, the
 second (fast) links every repo to its peers' interfaces."""
-import json
+
 import os
 import sys
-from pathlib import Path
+
 
 def _ignore_foreign_pythonpath():
     """Use only this environment's packages. PYTHONPATH/PYTHONHOME set for other tools would be
@@ -24,6 +24,10 @@ def _ignore_foreign_pythonpath():
 
 
 _ignore_foreign_pythonpath()
+
+
+import json
+from pathlib import Path
 
 for _s in (sys.stdout, sys.stderr):      # Windows consoles/pipes default to cp1252, which cannot print ✓ — … etc.
     if hasattr(_s, "reconfigure"):

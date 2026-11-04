@@ -16,13 +16,11 @@ Usage:
   cd orchestrator/
   python setup.py
 """
-import json
-import shutil
-import sys
-from pathlib import Path
-from textwrap import dedent
 
 import os
+import sys
+
+
 def _ignore_foreign_pythonpath():
     """Use only this environment's packages. PYTHONPATH/PYTHONHOME set for other tools would be
     searched before the virtual environment, and their libraries (possibly built for another
@@ -37,6 +35,12 @@ def _ignore_foreign_pythonpath():
 
 
 _ignore_foreign_pythonpath()
+
+
+import json
+import shutil
+from pathlib import Path
+from textwrap import dedent
 
 for _s in (sys.stdout, sys.stderr):      # Windows consoles/pipes default to cp1252, which cannot print ✓ — … etc.
     if hasattr(_s, "reconfigure"):

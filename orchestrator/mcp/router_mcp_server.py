@@ -6,8 +6,27 @@ how much relevant content is found across docs and source code.
 
 Launch: python orchestrator/mcp/router_mcp_server.py
 """
+
 import os
 import sys
+
+
+def _ignore_foreign_pythonpath():
+    """Use only this environment's packages. PYTHONPATH/PYTHONHOME set for other tools would be
+    searched before the virtual environment, and their libraries (possibly built for another
+    Python version) imported instead. Drop them here and for every process started from here;
+    only this program's own folder is kept."""
+    own = os.path.dirname(os.path.abspath(__file__))
+    for var in ("PYTHONPATH", "PYTHONHOME"):
+        value = os.environ.pop(var, None)
+        if var == "PYTHONPATH" and value:
+            foreign = {os.path.abspath(p) for p in value.split(os.pathsep) if p} - {own}
+            sys.path[:] = [p for p in sys.path if not p or os.path.abspath(p) not in foreign]
+
+
+_ignore_foreign_pythonpath()
+
+
 from pathlib import Path
 
 def _require_supported_os(what: str) -> None:
@@ -37,21 +56,6 @@ def _require_venv(what: str) -> None:
                  f"       Then use:        <framework>/.venv/bin/python …   "
                  f"(Windows: <framework>\\.venv\\Scripts\\python.exe)\n"
                  f"       To run without a venv on purpose, set AO_ALLOW_NO_VENV=1.")
-
-def _ignore_foreign_pythonpath():
-    """Use only this environment's packages. PYTHONPATH/PYTHONHOME set for other tools would be
-    searched before the virtual environment, and their libraries (possibly built for another
-    Python version) imported instead. Drop them here and for every process started from here;
-    only this program's own folder is kept."""
-    own = os.path.dirname(os.path.abspath(__file__))
-    for var in ("PYTHONPATH", "PYTHONHOME"):
-        value = os.environ.pop(var, None)
-        if var == "PYTHONPATH" and value:
-            foreign = {os.path.abspath(p) for p in value.split(os.pathsep) if p} - {own}
-            sys.path[:] = [p for p in sys.path if not p or os.path.abspath(p) not in foreign]
-
-
-_ignore_foreign_pythonpath()
 
 _require_supported_os("the orchestrator MCP server")
 _require_venv("the orchestrator MCP server")

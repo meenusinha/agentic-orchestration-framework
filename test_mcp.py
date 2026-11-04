@@ -10,15 +10,10 @@ Usage (from repo root, with venv active):
 
 Output is printed to stdout AND saved to a new file in results/ (never overwritten).
 """
+
 import os
 import sys
-import json
-import shutil
-import subprocess
-import threading
-import time
-from datetime import date
-from pathlib import Path
+
 
 def _ignore_foreign_pythonpath():
     """Use only this environment's packages. PYTHONPATH/PYTHONHOME set for other tools would be
@@ -34,6 +29,15 @@ def _ignore_foreign_pythonpath():
 
 
 _ignore_foreign_pythonpath()
+
+
+import json
+import shutil
+import subprocess
+import threading
+import time
+from datetime import date
+from pathlib import Path
 
 for _s in (sys.stdout, sys.stderr):      # Windows consoles/pipes default to cp1252, which cannot print ✓ — … etc.
     if hasattr(_s, "reconfigure"):

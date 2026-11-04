@@ -12,18 +12,10 @@ Opens a local page in your browser: install → model → repos → review → c
 - Local only: listens on 127.0.0.1, every request needs a random token, and requests for
   any other host name are refused. Standard library only — nothing to install first.
 """
-import argparse
-import json
+
 import os
-import secrets
-import subprocess
 import sys
-import threading
-import time
-import webbrowser
-from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
-from pathlib import Path
-from urllib.parse import parse_qs, urlparse
+
 
 def _ignore_foreign_pythonpath():
     """Use only this environment's packages. PYTHONPATH/PYTHONHOME set for other tools would be
@@ -39,6 +31,18 @@ def _ignore_foreign_pythonpath():
 
 
 _ignore_foreign_pythonpath()
+
+
+import argparse
+import json
+import secrets
+import subprocess
+import threading
+import time
+import webbrowser
+from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
+from pathlib import Path
+from urllib.parse import parse_qs, urlparse
 
 for _s in (sys.stdout, sys.stderr):      # Windows consoles/pipes default to cp1252, which cannot print ✓ — … etc.
     if hasattr(_s, "reconfigure"):

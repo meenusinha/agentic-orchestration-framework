@@ -9,12 +9,10 @@ read from stdin (one JSON object per line) and writes one JSON response per line
 Every answer is also saved as Markdown under <framework>/results/ with a new,
 unique name (date_time_mode_question.md) — earlier results are never overwritten.
 """
-import json
+
 import os
 import sys
-import time
-import traceback
-from pathlib import Path
+
 
 def _ignore_foreign_pythonpath():
     """Use only this environment's packages. PYTHONPATH/PYTHONHOME set for other tools would be
@@ -30,6 +28,12 @@ def _ignore_foreign_pythonpath():
 
 
 _ignore_foreign_pythonpath()
+
+
+import json
+import time
+import traceback
+from pathlib import Path
 
 FW = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(FW / "repo-agent" / "mcp"))

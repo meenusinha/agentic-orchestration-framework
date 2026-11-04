@@ -19,22 +19,10 @@ file:// URLs — no network access to any repository host.
 Exit code 0 = all checks passed. (Windows and Linux are the supported platforms; to run the
 tests elsewhere, set AO_ALLOW_UNSUPPORTED_OS=1.)
 """
-import argparse
-import json
-import os
-import re
-import subprocess
-import sys
-import tempfile
-import threading
-import time
-import urllib.error
-import urllib.request
-from pathlib import Path
 
-for _s in (sys.stdout, sys.stderr):      # Windows consoles/pipes default to cp1252, which cannot print ✓ — … etc.
-    if hasattr(_s, "reconfigure"):
-        _s.reconfigure(encoding="utf-8", errors="replace")
+import os
+import sys
+
 
 def _ignore_foreign_pythonpath():
     """Use only this environment's packages. PYTHONPATH/PYTHONHOME set for other tools would be
@@ -50,6 +38,22 @@ def _ignore_foreign_pythonpath():
 
 
 _ignore_foreign_pythonpath()
+
+
+import argparse
+import json
+import re
+import subprocess
+import tempfile
+import threading
+import time
+import urllib.error
+import urllib.request
+from pathlib import Path
+
+for _s in (sys.stdout, sys.stderr):      # Windows consoles/pipes default to cp1252, which cannot print ✓ — … etc.
+    if hasattr(_s, "reconfigure"):
+        _s.reconfigure(encoding="utf-8", errors="replace")
 
 FW = Path(__file__).resolve().parent.parent
 RESULTS = []
@@ -101,7 +105,8 @@ def make_foreign_pythonpath() -> str:
     """A folder of fake packages that fail on import, like another tool's libraries built for a
     different Python. The tests put it on PYTHONPATH: the framework must never import from it."""
     d = Path(tempfile.mkdtemp(prefix="ao-foreign-pythonpath-"))
-    for pkg in ("numpy", "yaml", "mcp", "torch", "pydantic"):
+    # third-party names, plus standard-library names that old library folders often shadow
+    for pkg in ("numpy", "yaml", "mcp", "torch", "pydantic", "pathlib", "enum", "typing", "argparse", "json"):
         (d / pkg).mkdir()
         (d / pkg / "__init__.py").write_text(
             "raise ImportError('foreign PYTHONPATH was used: undefined symbol: _Py_ZeroStruct')\n")
