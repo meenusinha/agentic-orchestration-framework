@@ -20,6 +20,21 @@ import time
 from datetime import date
 from pathlib import Path
 
+def _ignore_foreign_pythonpath():
+    """Use only this environment's packages. PYTHONPATH/PYTHONHOME set for other tools would be
+    searched before the virtual environment, and their libraries (possibly built for another
+    Python version) imported instead. Drop them here and for every process started from here;
+    only this program's own folder is kept."""
+    own = os.path.dirname(os.path.abspath(__file__))
+    for var in ("PYTHONPATH", "PYTHONHOME"):
+        value = os.environ.pop(var, None)
+        if var == "PYTHONPATH" and value:
+            foreign = {os.path.abspath(p) for p in value.split(os.pathsep) if p} - {own}
+            sys.path[:] = [p for p in sys.path if not p or os.path.abspath(p) not in foreign]
+
+
+_ignore_foreign_pythonpath()
+
 for _s in (sys.stdout, sys.stderr):      # Windows consoles/pipes default to cp1252, which cannot print ✓ — … etc.
     if hasattr(_s, "reconfigure"):
         _s.reconfigure(encoding="utf-8", errors="replace")

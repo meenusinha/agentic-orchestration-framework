@@ -36,6 +36,21 @@ for _s in (sys.stdout, sys.stderr):      # Windows consoles/pipes default to cp1
     if hasattr(_s, "reconfigure"):
         _s.reconfigure(encoding="utf-8", errors="replace")
 
+def _ignore_foreign_pythonpath():
+    """Use only this environment's packages. PYTHONPATH/PYTHONHOME set for other tools would be
+    searched before the virtual environment, and their libraries (possibly built for another
+    Python version) imported instead. Drop them here and for every process started from here;
+    only this program's own folder is kept."""
+    own = os.path.dirname(os.path.abspath(__file__))
+    for var in ("PYTHONPATH", "PYTHONHOME"):
+        value = os.environ.pop(var, None)
+        if var == "PYTHONPATH" and value:
+            foreign = {os.path.abspath(p) for p in value.split(os.pathsep) if p} - {own}
+            sys.path[:] = [p for p in sys.path if not p or os.path.abspath(p) not in foreign]
+
+
+_ignore_foreign_pythonpath()
+
 FW = Path(__file__).resolve().parent.parent
 RESULTS = []
 
@@ -80,6 +95,17 @@ class GUI:
             if s["done"]:
                 return s["ok"], lines, s["result"]
             time.sleep(1)
+
+
+def make_foreign_pythonpath() -> str:
+    """A folder of fake packages that fail on import, like another tool's libraries built for a
+    different Python. The tests put it on PYTHONPATH: the framework must never import from it."""
+    d = Path(tempfile.mkdtemp(prefix="ao-foreign-pythonpath-"))
+    for pkg in ("numpy", "yaml", "mcp", "torch", "pydantic"):
+        (d / pkg).mkdir()
+        (d / pkg / "__init__.py").write_text(
+            "raise ImportError('foreign PYTHONPATH was used: undefined symbol: _Py_ZeroStruct')\n")
+    return str(d)
 
 
 def make_fixture_remotes(base: Path) -> dict:
@@ -164,7 +190,8 @@ def _run(a):
         remotes = make_fixture_remotes(Path(tempfile.mkdtemp(prefix="ao-remotes-")))
         a.server_url = a.server_url or remotes["sample-server"]
         a.client_url = a.client_url or remotes["sample-client"]
-    env = {**os.environ, "PYTHONUNBUFFERED": "1"}
+    # a foreign PYTHONPATH (other tools' libraries) must be ignored by everything the GUI runs
+    env = {**os.environ, "PYTHONUNBUFFERED": "1", "PYTHONPATH": make_foreign_pythonpath()}
     env.pop("VIRTUAL_ENV", None)
 
     print(f"\n1. Start the GUI ({sys.platform})", flush=True)
