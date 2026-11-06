@@ -42,6 +42,59 @@ ROUTER_SETTINGS = {
 }
 CREATION_KEYS = tuple(k for k, v in REPO_SETTINGS.items() if v[1] == "creation")
 
+# Longer explanations, shown when hovering over a setting on the setup page.
+HELP = {
+    "src_path": "Which folders are parsed into the GraphRAG. \".\" indexes the whole repository; dependency, "
+                "build-output, virtual-environment and cache folders are skipped automatically. Give a list (e.g. "
+                "src, include, idl) to index only those folders.",
+    "knowledge_path": "Folders with extra documentation (Markdown) outside the indexed folders. Markdown inside the "
+                      "indexed folders is included anyway. Every document is split into heading sections, each "
+                      "stored as one searchable unit.",
+    "exclude": "Files and folders that are never indexed, as patterns relative to the repository root: build/** "
+               "skips a folder, *.generated.c skips matching files. Excluded code can't be found or linked to.",
+    "extra_extensions": "File types that aren't recognised automatically but should still be searchable. Their "
+                        "files are stored as whole plain-text units (no functions or classes). For code in another "
+                        "language, answer the question in the Review step instead.",
+    "max_file_kb": "Files larger than this are skipped — usually generated, minified or data files. Raising it "
+                   "indexes them, but building takes longer and results get noisier.",
+    "embed_batch_size": "How many units are turned into vectors at once while building. Higher is faster but "
+                        "uses more memory; lower it if a build runs out of memory. It doesn't change the results.",
+    "refresh_seconds": "How often each running MCP server checks for changed files and updates the graph. Only "
+                       "changed units are re-embedded. Lower = fresher results, a little more disk activity.",
+    "top_k": "The maximum number of results one search returns from each repository. Copilot can ask for a "
+             "different number per request (up to 20).",
+    "result_budget_tokens": "The maximum size of one answer (about characters ÷ 4). Results are added whole, best "
+                            "first; those that don't fit are listed by name under \"more\" and can be opened "
+                            "one by one. Nothing is ever cut off.",
+    "candidate_pool": "How many best matches are taken from the meaning-based (vector) search and from the "
+                      "keyword search before the two lists are combined. Larger = more thorough, slightly slower.",
+    "rrf_k": "Reciprocal-rank fusion: in each list a result scores 1 / (this value + its rank), and the scores are "
+             "added. A low value lets the top few of each list dominate; a high value favours results that rank "
+             "well in both lists.",
+    "impact_depth": "For \"impact of change\": how many levels of callers are followed. 1 = direct callers only, "
+                    "2 = their callers too. Deeper finds more indirect effects, with more noise.",
+    "role_weights": "Each result's score is multiplied by the weight of its folder role, so that, for example, "
+                    "interfaces rank higher and generated or vendored code lower. 0 = never returned.",
+    "router_top_repos": "How many other repositories the router selects for a Copilot request, in addition to any "
+                        "repository linked through an IDL interface the request touches.",
+    "router_hits_per_repo": "How many search hits per repository the router looks at when judging how relevant "
+                            "that repository is. Higher = better judgement, slightly slower.",
+}
+ROLE_HELP = {
+    "interface": "Public headers, IDL and API definitions — ranked up by default.",
+    "implementation": "The main source code.",
+    "internal": "Private implementation details.",
+    "library": "Shared libraries built in this repository.",
+    "docs": "Documentation sections.",
+    "tooling": "Scripts and developer tools.",
+    "example": "Examples and samples.",
+    "external": "Vendored third-party code (signatures only).",
+    "generated": "Code generated from IDL or other sources.",
+    "build": "Makefiles, CMake and other build files.",
+    "config": "Configuration files.",
+    "test": "Tests — 0 means never returned as results; they still appear as \"tested by\" evidence.",
+}
+
 
 def defaults(spec=REPO_SETTINGS) -> dict:
     return {k: (dict(v[0]) if isinstance(v[0], dict) else list(v[0]) if isinstance(v[0], list) else v[0])
@@ -49,8 +102,8 @@ def defaults(spec=REPO_SETTINGS) -> dict:
 
 
 def describe(spec=REPO_SETTINGS) -> list[dict]:
-    return [{"key": k, "default": v[0], "group": v[1], "label": v[2], "kind": v[3], "min": v[4], "max": v[5]}
-            for k, v in spec.items()]
+    return [{"key": k, "default": v[0], "group": v[1], "label": v[2], "kind": v[3], "min": v[4], "max": v[5],
+             "help": HELP.get(k, v[2])} for k, v in spec.items()]
 
 
 def _as_list(v) -> list:

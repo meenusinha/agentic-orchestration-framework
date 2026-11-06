@@ -110,6 +110,14 @@ details summary{cursor:pointer;color:var(--muted);font-size:12.5px;padding:2px 0
 .wgrid label{display:flex;justify-content:space-between;align-items:center;gap:10px;font-size:13px;min-width:0}.wgrid input{width:80px;flex:none}
 input[type=number]{font:inherit;font-size:14px;padding:7px 9px;border-radius:9px;border:1px solid var(--line);background:#fff;color:var(--ink)}
 input[type=number]:focus{outline:none;border-color:#93c5fd;box-shadow:var(--ring)}input.bad{border-color:var(--bad)}
+/* hover help for settings: the whole label shows the explanation; the ⓘ is focusable for keyboards */
+.tipwrap{position:relative;cursor:help}
+.tipwrap:hover::after,.tipwrap:focus-within::after{content:attr(data-tip);position:absolute;left:0;top:calc(100% + 6px);z-index:20;
+width:min(380px,80vw);background:#0f172a;color:#f8fafc;font-size:12.5px;line-height:1.5;font-weight:400;padding:9px 11px;
+border-radius:9px;box-shadow:0 8px 24px rgba(15,23,42,.25);white-space:normal;pointer-events:none}
+.wgrid .tipwrap::after{left:auto;right:0;width:min(270px,70vw)}
+.tip{display:inline-grid;place-items:center;width:16px;height:16px;margin-left:6px;border-radius:50%;background:var(--chip);
+color:var(--muted);font-size:10.5px;font-weight:700;vertical-align:1px}.tip:focus{outline:none;box-shadow:var(--ring)}
 .fp{font:11.5px ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;color:var(--muted)}
 .hist{display:flex;justify-content:space-between;align-items:center;gap:10px;padding:9px 4px;border-bottom:1px solid var(--line2);font-size:13px}
 .hist:last-child{border-bottom:0}.hist:hover{background:var(--soft)}
@@ -212,12 +220,12 @@ input[type=number]:focus{outline:none;border-color:#93c5fd;box-shadow:var(--ring
 
     <section data-step="settings">
       <h2>Settings</h2>
-      <p class="sub">How the GraphRAG is created and how queries behave. Every value shows its default. Creation settings take effect when the GraphRAG is rebuilt; query settings take effect immediately on this page, and in Copilot after reloading VS Code.</p>
+      <p class="sub">How the GraphRAG is created and how queries behave. Hover over a setting (or its <span class="tip">i</span>) to see what it does. Every value shows its default. Creation settings take effect when the GraphRAG is rebuilt; query settings take effect immediately on this page, and in Copilot after reloading VS Code.</p>
       <div class="row" style="margin-bottom:12px"><label for="setRepo" class="small">Repository</label><select id="setRepo"></select>
         <label class="small"><input type="checkbox" id="setAll"> apply to all repositories</label></div>
       <div class="card"><h3>GraphRAG creation</h3><div class="sgrid" id="setCreation"></div></div>
       <div class="card"><h3>Queries</h3><div class="sgrid" id="setQuery"></div>
-        <div style="margin-top:12px" class="small">Ranking weight per folder role (0 = never returned)</div><div class="wgrid" id="setWeights" style="margin-top:6px"></div></div>
+        <div style="margin-top:12px" class="small"><span class="tipwrap" id="setWeightsHelp" data-tip="">Ranking weight per folder role (0 = never returned)<span class="tip" tabindex="0" aria-label="">i</span></span></div><div class="wgrid" id="setWeights" style="margin-top:6px"></div></div>
       <div class="card"><h3>Router <span class="small">(all repositories)</span></h3><div class="sgrid" id="setRouter"></div></div>
       <div class="row"><button id="setReset">Reset to defaults</button><span class="spacer"></span><button class="primary" id="setSave">Save</button></div>
       <div id="setResult" style="margin-top:12px"></div><div class="log" id="setLog"></div>
@@ -665,14 +673,19 @@ function fieldHtml(sp, value) {
   const input = sp.kind === "int"
     ? `<input type="number" id="${id}" value="${esc(v)}" min="${sp.min}" max="${sp.max}" step="1">`
     : `<input type="text" id="${id}" value="${esc(v)}" placeholder="${sp.kind === "paths" ? "path, path …" : "comma-separated"}">`;
-  return `<label for="${id}">${esc(sp.label)}<div class="hintd">default ${esc(def)}${sp.kind === "int" ? ` · ${sp.min}–${sp.max}` : ""}</div></label>${input}`;
+  const help = esc(sp.help || sp.label);
+  return `<label for="${id}" class="tipwrap" data-tip="${help}">${esc(sp.label)}<span class="tip" tabindex="0" aria-label="${help}">i</span>
+    <div class="hintd">default ${esc(def)}${sp.kind === "int" ? ` · ${sp.min}–${sp.max}` : ""}</div></label>${input.replace("<input ", `<input title="${help}" `)}`;
 }
 function fillSettings() {
   const r = SET.repos.find(x => x.name === $("#setRepo").value) || SET.repos[0]; if (!r) return;
   $("#setCreation").innerHTML = SET.spec.filter(x => x.group === "creation").map(sp => fieldHtml(sp, r.values[sp.key])).join("");
   $("#setQuery").innerHTML = SET.spec.filter(x => x.group === "query" && x.kind !== "weights").map(sp => fieldHtml(sp, r.values[sp.key])).join("");
   const wdef = SET.defaults.role_weights;
-  $("#setWeights").innerHTML = Object.keys(wdef).map(role => `<label>${esc(role)} <input type="number" step="0.05" min="0" max="3" data-role="${esc(role)}" value="${r.values.role_weights[role]}" title="default ${wdef[role]}"></label>`).join("");
+  const rh = SET.role_help || {}, wsp = SET.spec.find(x => x.key === "role_weights") || {};
+  $("#setWeightsHelp").setAttribute("data-tip", wsp.help || ""); $("#setWeightsHelp").querySelector(".tip").setAttribute("aria-label", wsp.help || "");
+  $("#setWeights").innerHTML = Object.keys(wdef).map(role => { const t = esc(`${rh[role] || role} Default ${wdef[role]}.`);
+    return `<label class="tipwrap" data-tip="${t}">${esc(role)} <input type="number" step="0.05" min="0" max="3" data-role="${esc(role)}" value="${r.values.role_weights[role]}" title="${t}"></label>`; }).join("");
   $("#setRouter").innerHTML = SET.router_spec.map(sp => fieldHtml(sp, SET.router[sp.key])).join("");
 }
 async function showSettings() {

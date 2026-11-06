@@ -409,7 +409,8 @@ def get_settings() -> dict:
                       "set": sorted(k for k in rc if k in settings.REPO_SETTINGS)})
     return {"spec": settings.describe(), "router_spec": settings.describe(settings.ROUTER_SETTINGS),
             "repos": repos, "router": settings.load(orch_cfg(), settings.ROUTER_SETTINGS),
-            "defaults": settings.defaults(), "router_defaults": settings.defaults(settings.ROUTER_SETTINGS)}
+            "defaults": settings.defaults(), "router_defaults": settings.defaults(settings.ROUTER_SETTINGS),
+            "role_help": settings.ROLE_HELP}
 
 
 def save_settings(body: dict) -> tuple[int, dict]:

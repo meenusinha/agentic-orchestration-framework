@@ -447,6 +447,11 @@ def _run(a):
         check("settings: every value has a default, and defaults apply",
               code == 200 and srv0.get("values", {}).get("top_k") == 5 and st0["router"]["router_top_repos"] == 2
               and all("default" in x for x in st0["spec"]), f"{len(st0.get('spec', []))} repository settings")
+        no_help = [x["key"] for x in st0.get("spec", []) + st0.get("router_spec", []) if len(x.get("help", "")) < 40]
+        no_role = [r for r in st0.get("defaults", {}).get("role_weights", {}) if len(st0.get("role_help", {}).get(r, "")) < 10]
+        check("settings: every setting and every role has a hover explanation", not no_help and not no_role,
+              f"missing: {no_help + no_role}" if no_help or no_role else
+              f"{len(st0['spec']) + len(st0['router_spec'])} settings, {len(st0['role_help'])} roles")
         code, bad = g.call("/api/settings", {"repos": {"sample-server": {"top_k": 0, "exclude": ["../outside"]}}})
         check("settings: invalid values are refused with the reason", code == 400 and "sample-server" in bad.get("errors", {}),
               "; ".join(bad.get("errors", {}).get("sample-server", []))[:90])
