@@ -21,6 +21,7 @@ Re-running for repos that are already configured — choose what is overwritten:
                              --file-type values given (default: they are merged in)
   --reset-settings NAME      GraphRAG creation and query settings back to their defaults
                              (folders to index and components left for later are kept)
+  --exclude NAME=GLOB        folders/files never indexed (repeatable; NAME= alone clears them)
   --keep NAME=instructions   keep the repo's .github/copilot-instructions.md as it is
   --keep NAME=skill          keep the repo's installed agent skill as it is
   --drop NAME                disconnect a repo (its files are left untouched)
@@ -362,7 +363,7 @@ def _read_repo_cfg(repo: Path) -> dict:
         return {}
 
 
-def _require_classified(framework: Path, targets, file_types_by) -> None:
+def _require_classified(framework: Path, targets, file_types_by, exclude_by=None) -> None:
     """Stop until every unknown file type in every repo has been classified by the developer."""
     mcp_dir = framework / "repo-agent" / "mcp"
     if not (mcp_dir / "codegraph").is_dir():
@@ -374,7 +375,8 @@ def _require_classified(framework: Path, targets, file_types_by) -> None:
     for name, _, path in targets:
         current = _read_repo_cfg(path).get("file_types") or {}
         ft = {**current, **file_types_by.get(name, {})}
-        _, unknown, _ = collect_files(IndexConfig(name, path, [path], ft))
+        excl = (exclude_by or {}).get(name, _read_repo_cfg(path).get("exclude") or [])
+        _, unknown, _ = collect_files(IndexConfig(name, path, [path], ft, exclude=excl))
         for ext, samples in sorted(unknown.items()):
             problems.append(f"  {name}: {ext}  ({len(samples)} file(s), e.g. {samples[0]})")
     if problems:
@@ -465,6 +467,8 @@ def main() -> None:
                     help="proceed even if some file types are still unclassified (they are not indexed)")
     ap.add_argument("--ext", action="append", default=[], metavar="NAME=.EXT",
                     help="extra file extension to index as code for a repo (repeatable)")
+    ap.add_argument("--exclude", action="append", default=[], metavar="NAME=GLOB",
+                    help="folder or file pattern never indexed (repeatable); NAME= alone clears the list")
     ap.add_argument("--replace-roles", action="append", default=[], metavar="NAME",
                     help="folder roles and file types become exactly the given --role/--file-type values")
     ap.add_argument("--reset-settings", action="append", default=[], metavar="NAME",
@@ -537,6 +541,17 @@ def main() -> None:
                 "Rename it or move it aside, then re-run."
             )
     keep_by = _per_repo(args.keep)
+    exclude_by = _per_repo(args.exclude)
+    if exclude_by:
+        mcp_dir = framework / "repo-agent" / "mcp"
+        if str(mcp_dir) not in sys.path:
+            sys.path.insert(0, str(mcp_dir))
+        from codegraph import settings as _settings
+        for n, globs in exclude_by.items():
+            clean, errors = _settings.validate({"exclude": globs})
+            if errors:
+                raise SystemExit(f"ERROR: --exclude {n}: {'; '.join(errors)}")
+            exclude_by[n] = clean["exclude"]
     for n, items in keep_by.items():
         bad = [i for i in items if i not in KEEP_ITEMS]
         if bad:
@@ -544,13 +559,13 @@ def main() -> None:
     if {n for n, _, _ in targets} & set(args.drop):
         raise SystemExit("ERROR: a repo can't be both connected (--repo) and dropped (--drop)")
     unknown = (set(src_by) | set(knowledge_by) | set(ext_by) | set(ftype_by) | set(role_by) |
-               set(args.replace_roles) | set(args.reset_settings) | set(keep_by)) - \
+               set(args.replace_roles) | set(args.reset_settings) | set(keep_by) | set(exclude_by)) - \
         {n for n, _, _ in targets}
     if unknown:
         raise SystemExit(f"ERROR: --src/--knowledge/--ext/--file-type/--role name(s) {sorted(unknown)} "
                          "have no matching --repo")
     if not args.allow_unclassified:
-        _require_classified(framework, targets, file_types_by)
+        _require_classified(framework, targets, file_types_by, exclude_by)
     if len(set(by_name) | {name for name, _, _ in targets}) < 2:
         raise SystemExit("ERROR: at least two repos are needed for cross-repo analysis")
     _check_model_plan(model_dir, model_from)
@@ -588,6 +603,8 @@ def main() -> None:
                 indexing["structure"] = structure_by[name] + [e for e in current if e.get("path") not in given]
         if name in args.reset_settings:
             indexing.update(_setting_defaults(framework))
+        if name in exclude_by:                          # what the developer chose to include/exclude
+            indexing["exclude"] = exclude_by[name]
         summary = _install_repo_agent(framework, name, entry.get("display_name", name), path, indexing)
         print(f"  ✓ {name:20s} {path}\n      {summary}")
 

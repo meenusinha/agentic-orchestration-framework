@@ -100,7 +100,7 @@ browser. It runs on `127.0.0.1` only and is protected by a one-time token. Six s
 | **1. Install** | Click **Install**. The hash-locked packages go into `.venv`; nothing is installed into your system Python. If they're already installed, choose **Keep and continue** or **Reinstall all packages** |
 | **2. Model** | Nothing to do: the included model is checked file by file against its pinned fingerprints (see [Model integrity](#model-integrity-hash-pinning)). Keep it, or type another folder holding the approved model to replace it. Only if `models/` is missing does it ask you to point to another copy |
 | **3. Repositories** | Add each repository to connect, at least two. Either type its folder path (or **Choose folder…**) for a repository you've already cloned, or **Clone from Git**: enter the URL and branch and choose the folder to clone into. If that folder already holds a clone of the same repository, it's updated and switched to the branch instead. Repositories connected before are listed; removing one disconnects it at step 5 (its files stay) |
-| **4. Review** | Check what the scan found: languages, size, processes and libraries, IDL interfaces and the role of each folder. If a file type is unknown, say what it contains (implementation, interface, configuration, …) and which language to read it as. Answers saved by an earlier setup are shown and can be changed |
+| **4. Review** | Check what the scan found: languages, size, processes and libraries, IDL interfaces and the role of each folder. **Choose which folders to index**: untick a folder to exclude it (**Select all** / **Exclude all** per repository), and add sub-folders or file patterns to exclude, typed or with **Browse…**. If a file type is unknown, say what it contains (implementation, interface, configuration, …) and which language to read it as; types found only in excluded folders aren't asked. Answers saved by an earlier setup are shown and can be changed |
 | **5. Configure** | Click **Configure**. This writes the VS Code configuration into each repository (see [Files the framework adds](#files-the-framework-adds-to-your-repositories)). For a repository set up before, you first choose what to overwrite (see [Setting up again](#setting-up-again-what-is-kept-and-what-is-overwritten)) |
 | **6. Create GraphRAG** | The page first estimates how long it takes on this computer, per component. Create everything, or choose fewer components as a first batch and add the rest later (see [Large repositories](#large-repositories-time-estimate-batches-progress)). A progress bar shows how far it is and the time left. The page then shows which processes serve and call each IDL interface |
 
@@ -119,25 +119,37 @@ estimate and lets you build in batches:
    its sub-folders. Top-level files, such as the build files that tell which processes
    exist, are always included.
 2. **Estimate.** The page lists every file that would be indexed, checks which are already
-   in the GraphRAG with unchanged content (their vectors are reused), and parses and
-   embeds a small sample of your real code with the real model on this computer. From that
-   it shows the time per component, per repository and in total. Nothing is written while
-   estimating.
-3. **Choose.** If everything takes more than 15 minutes, the page suggests a batch:
-   **Create all**, or tick fewer components (**Suggest a first batch** picks what fits in
-   about 15 minutes) and click **Create batch 1**. Unticked components are *left for later*:
+   in the GraphRAG with unchanged content (their vectors are reused), and resolves folder
+   roles (tests are never embedded; external code only by its signatures). It parses a
+   sample of your real code from every component, and embeds it with the real model on this
+   computer. From that it shows the time per component, per repository and in total.
+   Nothing is written while estimating.
+   - Embedding cost grows faster than the text length (long functions cost more per
+     character), and the estimate takes that into account.
+   - Every larger build records this computer's real speed (numbers only, in
+     `~/.agentic-orchestration/build-speed.json`), and later estimates use it. The page says
+     which speed it used. In tests on two repositories of 26 MB and 6.5 MB of real code, the
+     estimate was 7% off with the sample's speed, and 10% off with a recorded build's speed;
+     with the recorded speed, the time left shown halfway through was within about 12%.
+3. **Choose.** Tick the components to create now: **Select all** / **Select none** per
+   repository or for all of them. If everything takes more than 15 minutes, the page
+   suggests a batch: **Create all**, or **Suggest a first batch** (picks what fits in about 15
+   minutes), then **Create batch 1**. Unticked components are *left for later*:
    they are saved in the repository's `deferred` setting, and every MCP server, the query
    field and the router leave them out the same way.
 4. **Progress.** While building, a progress bar shows the repository, the stage (reading,
    parsing, embedding, saving, then linking across repositories), the units done, and the
-   time left.
+   time left. The bar is weighted by the work each repository and stage needs (from the
+   estimate), and the time left follows the real speed as the build goes.
 5. **Next batch.** When a batch is done, the page lists what's still left and asks:
    **Create all remaining**, **Choose the next batch**, or **Stop here — add them later**.
    Copilot and the query field already work with what has been built. Each new batch only
    embeds the new components; everything built before is reused.
 
 You can come back to step 6 at any time to add the remaining components, or to leave some
-out again.
+out again. *Left for later* is different from *excluded* (step 4): an excluded folder is
+never indexed, in any batch, until you include it again. VS Code servers that are already
+running follow both changes at their next refresh.
 
 ### Setting up again: what is kept and what is overwritten
 
@@ -149,8 +161,8 @@ overwritten without asking:
 | 1. Install | Packages installed | **Keep and continue**, or **Reinstall all packages** (hash-verified again) |
 | 2. Model | Model verified | **Keep and continue**, or type another folder to replace it (checked first) |
 | 3. Repositories | Repositories connected | Keep them, add more, or remove one; a removed repository is disconnected at step 5 and its files are left as they are |
-| 4. Review | Folder roles and file-type answers saved | Shown as *saved* / *answered before*, and can be changed |
-| 5. Configure | Settings and generated files in the repository | Per repository, or for all at once (**Overwrite all** / **Keep all**): **folder roles and file types** (replace with step 4's answers, or keep), **GraphRAG and query settings** (reset to defaults, or keep), **Copilot instructions** (regenerate, or keep your edited file), **agent skill** (reinstall, or keep) |
+| 4. Review | Folders to index, folder roles and file-type answers saved | Excluded folders are shown unticked, saved roles as *saved*, file types as *answered before*; all can be changed |
+| 5. Configure | Settings and generated files in the repository | Per repository, or for all at once (**Overwrite all** / **Keep all**): **folders to index, roles and file types** (replace with step 4's answers, or keep), **GraphRAG and query settings** (reset to defaults, or keep), **Copilot instructions** (regenerate, or keep your edited file), **agent skill** (reinstall, or keep) |
 | 6. Create GraphRAG | A GraphRAG exists | Per repository: **update** it (the default: unchanged code is reused), or **start from scratch** (its stored graph and cached vectors are removed and everything is embedded again) |
 
 Always updated, because they must match this framework version and this computer: the
@@ -222,7 +234,7 @@ fills in the defaults.
 |---|---|---|---|
 | **GraphRAG creation** (per repository) | Folders to index (`src_path`) | `.` (the whole repository) | paths |
 | | Extra documentation folders (`knowledge_path`) | `./knowledge` | paths |
-| | Exclude (`exclude`) | none | globs, e.g. `build/**`, `*.generated.c` |
+| | Exclude (`exclude`) | none | globs, e.g. `build/**`, `*.generated.c`; also set in step 4 (untick a folder) |
 | | Components left for a later batch (`deferred`) | none (everything) | folders; filled in by step 6 |
 | | Extra file extensions indexed as text (`extra_extensions`) | none | e.g. `.tmpl` |
 | | Maximum file size (`max_file_kb`) | 2000 KB | 10–50000 |
@@ -302,6 +314,7 @@ the framework's virtual-environment Python (`.venv/bin/python`; on Windows
     --file-type 'repo-b=.xidl:interface:idl' --role 'repo-a=third_party/**:external:signatures'
 
 # Configure again, choosing what to overwrite for repositories set up before:
+#   --exclude NAME=GLOB        folder or file pattern never indexed (repeatable; NAME= clears)
 #   --replace-roles NAME       roles and file types become exactly the --role/--file-type given
 #   --reset-settings NAME      GraphRAG and query settings back to their defaults
 #   --keep NAME=instructions   keep the edited .github/copilot-instructions.md

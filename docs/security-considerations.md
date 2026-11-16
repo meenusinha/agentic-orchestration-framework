@@ -141,11 +141,14 @@ data disclosure) and to point them out instead. This lowers the risk; it can't e
 | Reading files outside the framework | Saved results are served by name only, from `results/` (path traversal refused); the knowledge-graph view reads graph databases read-only (`mode=ro`), with validated ids and configured repos only |
 | Runaway or overlapping actions | One job at a time; no shell is ever used |
 | Unintended overwriting when setting up again | Nothing an earlier setup left is overwritten without a choice on the page: reinstalling packages, replacing the model folder, replacing folder roles and file types, resetting settings, regenerating Copilot instructions, reinstalling the agent skill and starting a GraphRAG from scratch are each opt-in. Source code and `knowledge/` are never changed; disconnecting a repository leaves its files as they are |
+| Folders included or excluded in step 4 | Validated like the `exclude` setting: patterns inside the repository only (no absolute paths, no `..`); folders chosen with **Browse…** must lie inside the repository |
 | Components chosen for a batch | Folder names are validated as paths inside the repository (no absolute paths, no `..`) before they are written to the `deferred` setting; glob characters in folder names are escaped |
 
 The page runs only while the setup GUI is open, and **Close** stops it. The time estimate
 in step 6 only reads: it lists files, compares them with the stored graph opened read-only,
-and embeds a small sample locally with the approved model, writing nothing.
+and embeds a small sample locally with the approved model, writing nothing. Builds record
+this computer's speed in `~/.agentic-orchestration/build-speed.json` (private, like the
+logs): numbers only, no code or paths.
 
 ### 2.9 Cloning from the GUI
 

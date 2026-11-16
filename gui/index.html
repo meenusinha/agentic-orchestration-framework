@@ -201,7 +201,7 @@ color:var(--muted);font-size:10.5px;font-weight:700;vertical-align:1px}.tip:focu
 
     <section data-step="review">
       <h2>4. Review</h2>
-      <p class="sub">What the scan found in each repository. Correct any folder role, and tell us what unknown file types contain — nothing is guessed silently.</p>
+      <p class="sub">What the scan found in each repository. Choose which folders to index (untick a folder to exclude it), correct any folder role, and tell us what unknown file types contain — nothing is guessed silently.</p>
       <div id="reviewBody">Scanning…</div>
       <div class="row" style="margin-top:14px"><span class="spacer"></span><button class="primary" id="reviewNext">Continue</button></div>
       <div class="err" id="reviewErr"></div>
@@ -270,6 +270,9 @@ const ROLES = ["interface","implementation","internal","external","library","tes
 const KINDS = ["implementation","interface","server-config","config","docs","data","ignore"];
 const LANGS = ["c","cpp","python","idl","perl","matlab","java","javascript","typescript","go","rust","csharp","markdown","text"];
 let S = {}, done = new Set(), cur = "install", repos = [], scans = [], answers = {}, saved = {}, ow = {};
+const globEsc = s => s.replace(/[*?[]/g, c => "[" + c + "]");     // a folder name as an exact exclude pattern
+const globUnesc = s => s.replace(/\[([*?[])\]/g, "$1");
+const isTopFolder = (e, folders) => folders.includes(globUnesc(e.replace(/\/\*\*$/, "").replace(/\/$/, "")));
 const fmtBytes = n => n >= 1e9 ? (n/1e9).toFixed(1)+" GB" : n >= 1e6 ? (n/1e6).toFixed(1)+" MB" : n >= 1e3 ? Math.round(n/1e3)+" KB" : n+" B";
 const fmtDur = s => s < 60 ? "under a minute" : s < 5400 ? `about ${Math.round(s/60)} min` : `about ${Math.floor(s/3600)} h ${Math.round((s % 3600)/60)} min`;
 
@@ -441,7 +444,10 @@ async function showReview() {
     $("#reviewBody").innerHTML = "Scanning…"; $("#reviewNext").disabled = true;
     try { scans = (await api("/api/scan", {repos})).repos; } catch (e) { $("#reviewBody").innerHTML = `<p class="bad">${esc(e.message)}</p>`; return; }
     answers = {}; saved = {};
-    scans.forEach(sc => { answers[sc.name] = {roles:{}, types:{}}; saved[sc.name] = {roles:{}, types:{}};
+    scans.forEach(sc => { const tops = (sc.folders||[]).map(f => f.folder).filter(Boolean), ex = sc.saved_exclude || [];
+      const off = ex.filter(e => isTopFolder(e, tops)).map(e => globUnesc(e.replace(/\/\*\*$/, "").replace(/\/$/, "")));
+      const other = ex.filter(e => !isTopFolder(e, tops)).join(", ");
+      answers[sc.name] = {roles:{}, types:{}, off: new Set(off), other}; saved[sc.name] = {roles:{}, types:{}, off: new Set(off), other};
       (sc.folders||[]).forEach(f => { answers[sc.name].roles[f.folder] = f.role; saved[sc.name].roles[f.folder] = f.role; });
       (sc.unknown_types||[]).forEach(u => answers[sc.name].types[u.ext] = {kind:u.kind||"", parse_as:u.parse_as||""});
       (sc.saved_types||[]).forEach(u => { answers[sc.name].types[u.ext] = {kind:u.kind||"", parse_as:u.parse_as||"", saved:true};
@@ -454,9 +460,9 @@ async function showReview() {
     const procs = (sc.targets||[]).map(t => `<span class="chip">${esc(t.kind)}: ${esc(t.name)}</span>`).join("") || `<span class="small">no Makefile / CMake targets found</span>`;
     const ifs = (sc.interfaces||[]).map(i => `<span class="chip">${esc(i.name)} (${i.operations.length} ops)</span>`).join("") || `<span class="small">none</span>`;
     const langs = Object.entries(sc.languages||{}).map(([l,n]) => `<span class="chip">${esc(l)} ${n}</span>`).join("");
-    const folders = (sc.folders||[]).map(f => `<tr><td><code>${esc(f.folder ? f.folder+"/" : "(top level)")}</code>${f.folder && f.role !== f.auto_role ? ` <span class="st indexed" title="Saved by an earlier setup; automatic role: ${esc(f.auto_role)}">saved</span>` : ""}</td><td>${f.files}</td>
-      <td>${f.folder ? sel(ROLES, a.roles[f.folder], "role", `data-r="${esc(sc.name)}" data-f="${esc(f.folder)}"`) : esc(f.role)}</td></tr>`).join("");
-    const types = [...(sc.unknown_types||[]), ...(sc.saved_types||[]).map(u => ({...u, saved:true}))];
+    const folders = (sc.folders||[]).map(f => `<tr style="${a.off.has(f.folder) ? "opacity:.5" : ""}"><td>${f.folder ? `<input type="checkbox" data-inc="${esc(sc.name)}|${esc(f.folder)}" ${a.off.has(f.folder) ? "" : "checked"} title="Index this folder">` : `<input type="checkbox" checked disabled title="Top-level files are always indexed">`}</td><td><code>${esc(f.folder ? f.folder+"/" : "(top level)")}</code>${a.off.has(f.folder) ? ` <span class="st later">excluded</span>` : ""}${f.folder && f.role !== f.auto_role ? ` <span class="st indexed" title="Saved by an earlier setup; automatic role: ${esc(f.auto_role)}">saved</span>` : ""}</td><td>${f.files}</td>
+      <td>${f.folder ? sel(ROLES, a.roles[f.folder], "role", `data-r="${esc(sc.name)}" data-f="${esc(f.folder)}" ${a.off.has(f.folder) ? "disabled" : ""}`) : esc(f.role)}</td></tr>`).join("");
+    const types = [...(sc.unknown_types||[]).filter(u => !typeExcluded(sc.name, u)), ...(sc.saved_types||[]).map(u => ({...u, saved:true}))];
     const unk = types.map(u => { const t = a.types[u.ext];
       return `<tr><td><code>${esc(u.ext)}</code>${u.saved ? ` <span class="st indexed">answered before</span>` : `<div class="small">${u.count} file(s), e.g. ${esc(u.sample)}</div><div class="small">looks like ${esc(u.looks_like)}</div>`}</td>
       <td>${sel(["", ...KINDS], t.kind, "kind" + (t.kind ? "" : " need"), `data-r="${esc(sc.name)}" data-e="${esc(u.ext)}"`)}</td>
@@ -468,11 +474,31 @@ async function showReview() {
       <div class="small">IDL interfaces</div><div class="chips" style="margin:4px 0 8px">${ifs}</div>
       ${sc.generated?.length ? `<div class="small">${sc.generated.length} generated file(s) detected — indexed as generated, ranked low</div>` : ""}
       ${sc.secret_files ? `<div class="small">${sc.secret_files} secret-store file(s) will never be indexed</div>` : ""}
-      <table><tr><th>Folder</th><th>Files</th><th>Role</th></tr>${folders}</table>
+      <div class="row" style="margin-top:6px"><span class="small"><b>Folders to index</b> — untick a folder to exclude it (never indexed):</span><span class="spacer"></span>
+        <button class="link" data-incall="${esc(sc.name)}">Select all</button> · <button class="link" data-excall="${esc(sc.name)}">Exclude all</button></div>
+      <table><tr><th style="width:34px">Index</th><th>Folder</th><th>Files</th><th>Role</th></tr>${folders}</table>
+      <div class="field"><label>Also exclude — sub-folders or file patterns inside the repository, comma-separated (e.g. <code>src/legacy, *.generated.c</code>)</label>
+        <div class="row"><input type="text" data-other="${esc(sc.name)}" value="${esc(a.other)}" placeholder="none" style="flex:1"><button data-browse="${esc(sc.name)}">Browse…</button></div>
+        <span class="small err" data-othererr="${esc(sc.name)}"></span></div>
       ${unk ? `<h3 style="font-size:14px;margin-top:14px" class="${(sc.unknown_types||[]).length ? "warn" : ""}">${(sc.unknown_types||[]).length ? "Unknown file types — what do they contain?" : "File types answered before"}</h3>
       <table><tr><th>Type</th><th>Kind</th><th>Read as</th></tr>${unk}</table>` : ""}</div>`;
   }).join("");
   document.querySelectorAll("select.role").forEach(s => s.onchange = () => answers[s.dataset.r].roles[s.dataset.f] = s.value);
+  document.querySelectorAll("[data-inc]").forEach(c => c.onchange = () => { const [r, f] = c.dataset.inc.split("|");
+    c.checked ? answers[r].off.delete(f) : answers[r].off.add(f); showReview(); });
+  const setAllFolders = (r, on) => { (scans.find(s => s.name === r).folders||[]).forEach(f => { if (f.folder) on ? answers[r].off.delete(f.folder) : answers[r].off.add(f.folder); }); showReview(); };
+  document.querySelectorAll("[data-incall]").forEach(b => b.onclick = () => setAllFolders(b.dataset.incall, true));
+  document.querySelectorAll("[data-excall]").forEach(b => b.onclick = () => setAllFolders(b.dataset.excall, false));
+  document.querySelectorAll("[data-other]").forEach(i => i.onchange = () => { answers[i.dataset.other].other = i.value; });
+  document.querySelectorAll("[data-browse]").forEach(b => b.onclick = () => {
+    const sc = scans.find(s => s.name === b.dataset.browse), root = sc.path.replace(/[\/\\]+$/, "");
+    pick(p => { const err = document.querySelector(`[data-othererr="${CSS.escape(sc.name)}"]`);
+      const rel = p.startsWith(root) ? p.slice(root.length).replace(/^[\/\\]+/, "").replace(/\\/g, "/") : null;
+      if (!rel) { err.textContent = "Choose a folder inside " + root; return; }
+      err.textContent = ""; const a = answers[sc.name];
+      a.other = [...a.other.split(",").map(x => x.trim()).filter(Boolean), globEsc(rel)].filter((x, i, l) => l.indexOf(x) === i).join(", ");
+      showReview(); }, sc.path);
+  });
   document.querySelectorAll("select.kind").forEach(s => s.onchange = () => { answers[s.dataset.r].types[s.dataset.e].kind = s.value; showReview(); });
   document.querySelectorAll("select.lang").forEach(s => s.onchange = () => { answers[s.dataset.r].types[s.dataset.e].parse_as = s.value; showReview(); });
   $("#reviewNext").disabled = false;
@@ -480,21 +506,32 @@ async function showReview() {
 $("#reviewNext").onclick = () => {
   const missing = [];
   scans.forEach(sc => Object.entries(answers[sc.name]?.types||{}).forEach(([e,t]) => {
+    const u = (sc.unknown_types||[]).find(x => x.ext === e);
+    if (u && typeExcluded(sc.name, u)) return;                 // only in excluded folders: not asked
     if (!t.kind || (t.kind !== "ignore" && !t.parse_as)) missing.push(`${sc.name}: ${e}`); }));
   if (scans.some(sc => !sc.ok)) { $("#reviewErr").textContent = "Fix or remove the repositories with errors first."; return; }
   if (missing.length) { $("#reviewErr").textContent = "Please choose what these file types contain: " + missing.join(", "); return; }
   ow = {}; finish("review","configure");
 };
 
+function typeExcluded(name, u) {      // an unknown file type found only in excluded folders
+  const a = answers[name]; return !!(u.folders && u.folders.length && u.folders.every(f => f && a.off.has(f)));
+}
+function excludeList(name) {
+  const a = answers[name] || {off: new Set(), other: ""};
+  return [...[...a.off].sort().map(globEsc), ...a.other.split(",").map(x => x.trim()).filter(Boolean)];
+}
 /* 5 configure — for a repository set up before, the developer chooses what to overwrite */
 const OW_ITEMS = [   // [key, label, when overwritten, when kept]
-  ["roles", "Folder roles and file types", "replaced with your answers in step 4", "the saved ones are kept"],
+  ["roles", "Folders to index, roles and file types", "replaced with your answers in step 4", "the saved ones are kept"],
   ["settings", "GraphRAG and query settings", "reset to their defaults (excluded paths, top_k, role weights, …); the components chosen in step 6 stay", "your saved values are kept"],
   ["instructions", "Copilot instructions", "<code>.github/copilot-instructions.md</code> is regenerated (your own edits to it are lost)", "your current file is kept as it is"],
   ["skill", "Agent skill", "<code>.github/skills/cross-repo-feature-analysis/</code> is reinstalled (your own edits to it are lost)", "your current copy is kept as it is"]];
 const wasSetUp = name => !!connected(name)?.existing?.config;
 function reviewChanged(name) {
   const a = answers[name] || {roles:{}, types:{}}, s = saved[name] || {roles:{}, types:{}};
+  const sameSet = (x, y) => x.size === y.size && [...x].every(v => y.has(v));
+  if (!sameSet(a.off || new Set(), s.off || new Set()) || (a.other || "").replace(/\s/g, "") !== (s.other || "").replace(/\s/g, "")) return true;
   return Object.keys(a.roles).some(f => a.roles[f] !== s.roles[f]) ||
     Object.entries(a.types).some(([e,t]) => !s.types[e] || s.types[e].kind !== t.kind || (s.types[e].parse_as||"") !== (t.parse_as||""));
 }
@@ -509,12 +546,14 @@ function plan() {
     let roles = (sc.folders||[]).filter(f => f.folder && a.roles[f.folder] !== (f.auto_role || f.role))
       .map(f => ({path: f.folder + "/**", role: a.roles[f.folder], ...(a.roles[f.folder] === "external" ? {index:"signatures"} : {})}));
     roles = roles.concat((sc.saved_structure||[]).filter(e => !topGlob(e.path, sc)));     // deeper entries saved by hand
-    const types = {}; Object.entries(a.types).forEach(([e,t]) => types[e] = t.kind === "ignore" ? {kind:"ignore"} : {kind:t.kind, parse_as:t.parse_as});
+    const types = {}; Object.entries(a.types).forEach(([e,t]) => { const u = (sc.unknown_types||[]).find(x => x.ext === e);
+      if (u && typeExcluded(r.name, u)) return;
+      types[e] = t.kind === "ignore" ? {kind:"ignore"} : {kind:t.kind, parse_as:t.parse_as}; });
     if (old && !o.roles) {             // keep the saved answers; only newly found file types are added
       Object.keys(types).forEach(e => { if (a.types[e].saved) delete types[e]; });
       return {...r, roles: [], file_types: types, reset_settings: o.settings, keep: ["instructions","skill"].filter(k => !o[k])};
     }
-    return {...r, roles, file_types: types, replace_roles: old, ...(old ? {reset_settings: o.settings, keep: ["instructions","skill"].filter(k => !o[k])} : {})}; });
+    return {...r, roles, file_types: types, exclude: excludeList(r.name), replace_roles: old, ...(old ? {reset_settings: o.settings, keep: ["instructions","skill"].filter(k => !o[k])} : {})}; });
 }
 function showConfigure() {
   const p = plan(), olds = p.filter(r => wasSetUp(r.name)), gone = dropped();
@@ -528,6 +567,7 @@ function showConfigure() {
           (!o.roles && reviewChanged(r.name) ? `<div class="small warn">Your changes in step 4 are not saved while folder roles and file types are kept.</div>` : "") + `</div>` : "";
       return `<div class="card"><h3>${esc(r.name)} ${old ? `<span class="st indexed">set up before</span>` : `<span class="st">new</span>`}</h3><div class="path">${esc(r.path)}</div>
         <div class="small" style="margin-top:6px">${Object.keys(r.file_types).length ? "File types: " + Object.entries(r.file_types).map(([e,t]) => esc(e)+" → "+esc(t.kind)+(t.parse_as?" ("+esc(t.parse_as)+")":"")).join(", ") : old && !o.roles ? "File types: kept as saved" : "No unknown file types"}</div>
+        <div class="small">${r.exclude ? (r.exclude.length ? "Excluded (never indexed): " + r.exclude.map(esc).join(", ") : "Excluded: none — every folder is indexed") : "Excluded folders: kept as saved"}</div>
         <div class="small">${r.roles.length ? "Folder roles: " + r.roles.map(x => esc(x.path)+" → "+esc(x.role)).join(", ") : old && !o.roles ? "Folder roles: kept as saved" : "Folder roles as proposed"}</div>${opts}</div>`; }).join("") +
     (gone.length ? `<div class="notice">Will be disconnected: <b>${gone.map(x => esc(x.name)).join(", ")}</b> (removed in step 3). Its files are left as they are.</div>` : "");
   document.querySelectorAll("[data-ow]").forEach(c => c.onchange = () => { const [n, k] = c.dataset.ow.split("|"); owFor(n)[k] = c.checked; showConfigure(); });
@@ -545,9 +585,9 @@ $("#configureBtn").onclick = async () => {
 const LARGE = 15 * 60;                 // above this, suggest creating the GraphRAG in batches
 let EST = null, SEL = {}, FRESH = {}, BATCH = 0, estPromise = null;
 const compKey = (repo, c) => repo + "|" + c.path;
-function compSeconds(c, fresh) {
-  const r = EST.rates, cached = fresh ? 0 : c.cached_bytes;
-  return (c.bytes - cached) * (r.parse + r.embed) + cached * r.parse;
+function compSeconds(c, fresh) {     // every file is parsed; only new text is embedded (tests never)
+  const r = EST.rates;
+  return c.bytes * r.parse + (fresh ? c.embed_bytes_all : c.embed_bytes) * r.embed;
 }
 function totals(pick) {             // pick(repo, c) → included?
   let secs = EST.rates.model_load || 0, comps = 0, files = 0, bytes = 0;
@@ -592,9 +632,13 @@ function renderEstimate() {
       ? `<div class="notice"><b>Creating the whole GraphRAG takes ${fmtDur(all.secs)} on this computer</b> (${all.files.toLocaleString()} files, ${fmtBytes(all.bytes)}, ${nComps} components).
           You can create it all now, or start with fewer components as <b>batch ${BATCH + 1}</b> and add the rest in later batches.
           Copilot and the query field work with whatever has been created so far.
-          <div class="row" style="margin-top:8px"><button class="link" id="estSuggest">Suggest a first batch (up to ${fmtDur(LARGE)})</button> · <button class="link" id="estAll">Select all</button> · <button class="link" id="estNone">Clear the selection</button></div></div>`
+          <div class="row" style="margin-top:8px"><button class="link" id="estSuggest">Suggest a first batch (up to ${fmtDur(LARGE)})</button></div></div>`
       : `<div class="notice info">Creating the GraphRAG takes <b>${fmtDur(all.secs)}</b> on this computer (${all.files.toLocaleString()} files, ${fmtBytes(all.bytes)}). You can also leave components for a later batch.</div>`) +
-    EST.repos.map(rp => `<div class="card"><h3>${esc(rp.name)} <span class="small">${rp.files.toLocaleString()} files · ${fmtBytes(rp.bytes)} · ${rp.graph_exists ? "GraphRAG exists" : "no GraphRAG yet"}</span></h3>
+    `<div class="small" style="margin:-4px 0 6px">${EST.rates.source === "build" ? `Speed: from this computer's last GraphRAG build (${new Date(EST.rates.recorded * 1000).toLocaleDateString()}), applied to a sample of this code.` : EST.rates.source === "sample" ? "Speed: measured on a sample of this code with the real model. After the first larger build, estimates use that build's real speed and get more accurate." : "Speed: a default value (nothing to sample)."} The progress bar shows the real time left while building.</div>` +
+    `<div class="row small" style="margin:4px 0 2px">All repositories: <button class="link" id="estAll">Select all</button> · <button class="link" id="estNone">Select none (leave all for later)</button></div>` +
+    EST.repos.map(rp => `<div class="card"><div class="row"><h3 style="margin:0">${esc(rp.name)} <span class="small">${rp.files.toLocaleString()} files · ${fmtBytes(rp.bytes)} · ${rp.graph_exists ? "GraphRAG exists" : "no GraphRAG yet"}</span></h3><span class="spacer"></span>
+        <span class="small"><button class="link" data-selall="${esc(rp.name)}">Select all</button> · <button class="link" data-selnone="${esc(rp.name)}">Select none</button></span></div>
+      ${(rp.excluded||[]).length ? `<div class="small" style="margin-top:4px">Excluded, never indexed (step 4 / Settings): ${rp.excluded.map(x => `<code>${esc(x)}</code>`).join(", ")}</div>` : ""}
       <div class="comps"><table><tr><th></th><th>Component</th><th>Files</th><th>Size</th><th>Status</th><th>Time</th></tr>
       ${rp.components.map(c => `<tr><td><input type="checkbox" data-comp="${esc(compKey(rp.name, c))}" ${selected(rp.name, c) ? "checked" : ""} ${c.always ? "disabled title='Always included'" : ""}></td>
         <td><code>${esc(c.label)}</code></td><td>${c.files.toLocaleString()}</td><td>${fmtBytes(c.bytes)}</td><td>${stateChip(rp, c)}</td><td>${fmtDur(compSeconds(c, FRESH[rp.name]))}</td></tr>`).join("")}
@@ -605,16 +649,25 @@ function renderEstimate() {
      ${left.length ? `<div class="small" style="margin-top:6px">${left.length} component(s) left for later — not indexed until you choose them here again.</div>` : ""}`;
   document.querySelectorAll("[data-comp]").forEach(c => c.onchange = () => { SEL[c.dataset.comp] = c.checked; renderEstimate(); });
   document.querySelectorAll("[data-fresh]").forEach(c => c.onchange = () => { FRESH[c.dataset.fresh] = c.checked; renderEstimate(); });
-  if ($("#estSuggest")) { $("#estSuggest").onclick = () => { suggestBatch(); renderEstimate(); };
-    $("#estAll").onclick = () => { Object.keys(SEL).forEach(k => SEL[k] = true); renderEstimate(); };
-    $("#estNone").onclick = () => { Object.keys(SEL).forEach(k => SEL[k] = false); renderEstimate(); }; }
+  if ($("#estSuggest")) $("#estSuggest").onclick = () => { suggestBatch(); renderEstimate(); };
+  $("#estAll").onclick = () => { Object.keys(SEL).forEach(k => SEL[k] = true); renderEstimate(); };
+  $("#estNone").onclick = () => { Object.keys(SEL).forEach(k => SEL[k] = false); renderEstimate(); };
+  const setRepo = (name, on) => { Object.keys(SEL).forEach(k => { if (k.startsWith(name + "|")) SEL[k] = on; }); renderEstimate(); };
+  document.querySelectorAll("[data-selall]").forEach(b => b.onclick = () => setRepo(b.dataset.selall, true));
+  document.querySelectorAll("[data-selnone]").forEach(b => b.onclick = () => setRepo(b.dataset.selnone, false));
   $("#estAgain").onclick = () => showVerify(true);
   $("#verifyBtn").onclick = () => createGraph(selectionBody());
   if ($("#verifyAll")) $("#verifyAll").onclick = () => { Object.keys(SEL).forEach(k => SEL[k] = true); createGraph(selectionBody()); };
 }
+function workPlan(pick) {          // expected seconds per repository → weights of the progress bar
+  return Object.fromEntries(EST.repos.map(rp => { let parse = 0, embed = 0;
+    rp.components.forEach(c => { if (!pick(rp.name, c)) return;
+      parse += c.bytes * EST.rates.parse; embed += (FRESH[rp.name] ? c.embed_bytes_all : c.embed_bytes) * EST.rates.embed; });
+    return [rp.name, {parse, embed}]; }));
+}
 function selectionBody() {
   return {deferred: Object.fromEntries(EST.repos.map(rp => [rp.name, rp.components.filter(c => !selected(rp.name, c)).map(c => c.path)])),
-          fresh: Object.keys(FRESH).filter(n => FRESH[n])};
+          fresh: Object.keys(FRESH).filter(n => FRESH[n]), plan: workPlan(selected)};
 }
 const STAGE = {read: "reading files", parse: "parsing", embed: "embedding", write: "saving"};
 function progressView(el, expected) {   // → onProgress callback that draws the bar with the time left
@@ -644,12 +697,12 @@ async function createGraph(body) {
       `<div class="row" style="margin:-6px 0 8px"><button class="link" id="estShow">Show the components and estimate again</button></div>`;
     $("#estShow").onclick = () => showVerify(true);
     if (later.length) {
-      const secs = later.reduce((s, x) => s + compSeconds(x.c, false), 0);
+      const secs = later.reduce((s, x) => s + compSeconds(x.c, false), 0) + later.reduce((s, x) => s + x.c.bytes, 0) * EST.rates.parse;
       $("#batchBox").innerHTML = `<div class="notice"><b>Batch ${BATCH} is done.</b> ${later.length} component(s) are still left for later (${fmtDur(secs)}): ${later.slice(0, 8).map(x => `<code>${esc(x.repo)}: ${esc(x.c.label)}</code>`).join(", ")}${later.length > 8 ? " …" : ""}.
         Create the next batch now?
         <div class="row" style="margin-top:8px"><button class="primary" id="bAll">Create all remaining — ${fmtDur(secs)}</button><button id="bChoose">Choose the next batch</button><button class="link" id="bStop">Stop here — add them later</button></div></div>`;
       $("#bAll").onclick = () => { Object.keys(SEL).forEach(k => SEL[k] = true); FRESH = {};
-        createGraph({deferred: Object.fromEntries(EST.repos.map(rp => [rp.name, []])), fresh: []}); };
+        createGraph({deferred: Object.fromEntries(EST.repos.map(rp => [rp.name, []])), fresh: [], plan: workPlan(() => true)}); };
       $("#bChoose").onclick = async () => { FRESH = {}; $("#batchBox").innerHTML = ""; await showVerify(true); $("#estBox").scrollIntoView(); };
       $("#bStop").onclick = () => { $("#batchBox").innerHTML = `<div class="small">The remaining components stay out of the GraphRAG until you choose them in step 6 (Create GraphRAG).</div>`; };
     }

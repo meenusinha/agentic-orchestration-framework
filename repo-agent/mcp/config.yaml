@@ -39,6 +39,9 @@ structure: []
 # ── GraphRAG creation ── (changing these rebuilds the graph on the next start)
 # Paths never indexed, as globs inside the repository, e.g. [build/**, "*.generated.c"]
 exclude: []
+# Components (folders) left for a later batch — not indexed yet. Filled in by step 6 of the
+# setup page when the GraphRAG is created in batches; [] = everything
+deferred: []
 # Files larger than this are skipped (KB)
 max_file_kb: 2000
 # Units embedded per batch (higher = faster, more memory)

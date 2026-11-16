@@ -188,6 +188,7 @@ def analyze(name: str, root: Path) -> dict:
             pass
     out["files"], out["bytes"] = len(files), size
     out["saved_structure"] = cfg.structure
+    out["saved_exclude"] = [str(e) for e in (cfg_now.get("exclude") or [])]
     out["saved_types"] = [{"ext": ext, "kind": (ft or {}).get("kind", ""), "parse_as": (ft or {}).get("parse_as", "")}
                           for ext, ft in sorted((cfg_now.get("file_types") or {}).items())]
     out["unknown_types"] = []
@@ -195,6 +196,8 @@ def analyze(name: str, root: Path) -> dict:
         what, suggestion = _hint(root / samples[0])
         kind, _, parse_as = suggestion.partition(":")
         out["unknown_types"].append({"ext": ext, "count": len(samples), "sample": samples[0], "looks_like": what,
+                                     # top-level folders it occurs in: not asked if all of them are excluded
+                                     "folders": sorted({s.split("/")[0] if "/" in s else "" for s in samples}),
                                      "kind": kind, "parse_as": "" if parse_as.startswith("<") else parse_as,
                                      "needs_language": parse_as.startswith("<")})
     out["configured"] = bool(cfg_now)

@@ -29,6 +29,7 @@ import numpy as np
 
 from demo_logger import log, content
 from codegraph.security import is_secret_file, redact  # noqa: F401  (re-exported for callers)
+from codegraph.embedcost import work as embed_work
 from codegraph.indexer import IndexConfig, build
 from codegraph.search import GraphSearch
 from codegraph.store import Store
@@ -166,7 +167,9 @@ class RepoRAG:
         self.batch = max(1, int(embed_batch_size))
         self.search_opts = {"candidate_pool": candidate_pool, "rrf_k": rrf_k, "role_weights": role_weights}
         self.impact_depth = impact_depth
-        self.progress = progress or (lambda stage, done, total: None)    # (stage, done, total) while building
+        # progress(stage, done, total, frac=None) while building; embedding also reports frac, its
+        # share of the text done: units are embedded shortest first, so counts alone would mislead
+        self.progress = progress or (lambda *a, **k: None)
         self.index_dir = Path(index_dir) if index_dir else self.repo_root / ".rag_index"
         if not embedding_model:
             raise RuntimeError("No embedding model configured (EMBEDDING_MODEL_PATH)")
@@ -186,13 +189,16 @@ class RepoRAG:
 
     def _embed(self, texts):
         out = []
+        cost = [embed_work(len(t)) for t in texts]          # long texts cost more per character
+        total_work, done_work = sum(cost) or 1.0, 0.0
         for i in range(0, len(texts), self.batch):
-            self.progress("embed", i, len(texts))
+            self.progress("embed", i, len(texts), done_work / total_work)
+            done_work += sum(cost[i:i + self.batch])
             out.extend(np.asarray(self._model.encode(texts[i:i + self.batch], normalize_embeddings=True,
                                                      show_progress_bar=False), dtype=np.float32))
             if len(texts) > 256 and (i // self.batch) % 10 == 0:
                 log(self.repo_name, "INDEX", f"  Embedding: {min(i + self.batch, len(texts))}/{len(texts)}")
-        self.progress("embed", len(texts), len(texts))
+        self.progress("embed", len(texts), len(texts), 1.0)
         return out
 
     def _embed_query(self, q: str):
@@ -207,6 +213,13 @@ class RepoRAG:
         self.search = GraphSearch(self.store, self.repo_name, self._embed_query, self.cfg.peers, **self.search_opts)
         log(self.repo_name, "INDEX", "Code graph ready")
         return stats
+
+    def update_config(self, roots: list, file_types: dict = None, structure: list = None,
+                      extra_extensions: list = None, exclude: list = None, max_file_bytes: int = 2_000_000) -> None:
+        """Index with changed settings from now on (e.g. components added in a later batch).
+        Applied at the next refresh, which rebuilds and reuses every cached vector."""
+        self.cfg = IndexConfig(self.repo_name, self.repo_root, roots, file_types, structure, extra_extensions,
+                               self.cfg.peers, max_file_bytes=max_file_bytes, exclude=exclude)
 
     def clear_index(self) -> None:
         """Start from scratch: remove the stored graph and every cached vector."""

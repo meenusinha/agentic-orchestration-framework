@@ -40,7 +40,18 @@ First release for VS Code with GitHub Copilot, on Windows and Linux, under the A
   and files already in the GraphRAG are recognised. Large GraphRAGs can be created in
   batches; components left for later are kept in the `deferred` setting and added in later
   batches, reusing everything built before.
-- **Progress bar** while the GraphRAG is created: repository, stage, units done, time left.
+- **Progress bar** while the GraphRAG is created: repository, stage, units done, time left;
+  weighted by the estimated work per repository and stage, and by the measured cost of
+  embedding long texts.
+- **Estimates calibrate themselves**: each larger build records this computer's real speed
+  (numbers only), and later estimates use it; tests and external code are not counted as
+  embedding work.
+- **Include or exclude folders** in step 4 (Review): an Index checkbox per folder with
+  **Select all** / **Exclude all**, plus sub-folders or file patterns typed or chosen with
+  **Browse…**; saved as the `exclude` setting. Step 6 has **Select all** / **Select none**
+  per repository and for all. `configure.py` gains `--exclude`.
+- **Running VS Code servers follow changed indexing settings** (components added or left
+  for later, exclusions) at their next refresh.
 - **Setting up again** asks before overwriting: keep or reinstall packages; keep or replace
   the model; disconnect removed repositories; per repository, overwrite or keep folder roles
   and file types, GraphRAG settings, Copilot instructions and the agent skill; update or start

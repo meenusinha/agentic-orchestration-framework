@@ -85,7 +85,46 @@ def units_without_file(obj, path="", out=None):
 CHECKS = []
 
 
+def _set_key(text: str, key: str, value: str) -> str:
+    import re
+    line = f"{key}: {value}"
+    pat = re.compile(rf"(?m)^{key}:.*$")
+    return pat.sub(line, text, count=1) if pat.search(text) else text.rstrip("\n") + f"\n{line}\n"
+
+
+async def running_server_follows_batches():
+    """A server that is already running must follow a change to the components left for later
+    (made on the setup page while VS Code is open) at its next refresh — never rebuild the graph
+    with the settings it started with."""
+    c = CFG["sample-server"]
+    cfg = Path(c["args"][0]).parent / "config.yaml"
+    original = cfg.read_text(encoding="utf-8")
+    doc_q = {"query": "Restart authd after changing the policy", "k": 8}
+    from_docs = lambda r: [x["node"]["file"] for x in r["results"] if x["node"]["file"].startswith("docs/")]
+    try:
+        cfg.write_text(_set_key(original, "refresh_seconds", "10"), encoding="utf-8")
+        async with stdio_client(StdioServerParameters(command=c["command"], args=c["args"], env=c["env"])) as (r, w), \
+                ClientSession(r, w) as s:
+            await asyncio.wait_for(s.initialize(), TIMEOUT)
+
+            async def search():
+                res = await asyncio.wait_for(s.call_tool("search_code", doc_q), TIMEOUT)
+                return res.structuredContent if res.structuredContent is not None else json.loads(res.content[0].text)
+            before = from_docs(await search())
+            cfg.write_text(_set_key(cfg.read_text(encoding="utf-8"), "deferred", "[docs]"), encoding="utf-8")
+            await asyncio.sleep(11)
+            during = from_docs(await search())
+            cfg.write_text(_set_key(cfg.read_text(encoding="utf-8"), "deferred", "[]"), encoding="utf-8")
+            await asyncio.sleep(11)
+            after = from_docs(await search())
+        check("a running server follows components left for later, and added back, at its next refresh",
+              before and not during and after, f"docs results: {len(before)} → {len(during)} → {len(after)}")
+    finally:
+        cfg.write_text(original, encoding="utf-8")
+
+
 def check(name, ok, detail=""):
+    ok = bool(ok)
     CHECKS.append(ok)
     print(f"   {'PASS' if ok else 'FAIL'}  {name}" + (f"  — {detail}" if detail else ""), flush=True)
 
@@ -152,6 +191,8 @@ async def main():
                     {"requesting_repo": "sample-client", "feature_description": "show the policy hint in the login meter"})
     line = next((l.strip() for l in rr.splitlines() if "★" in l), "")
     check("router picks sample-server with an interface reason", "sample-server" in line and "serves" in line, line)
+
+    await running_server_follows_batches()
 
     print(f"\n   {sum(CHECKS)}/{len(CHECKS)} checks passed")
     sys.exit(0 if all(CHECKS) else 1)

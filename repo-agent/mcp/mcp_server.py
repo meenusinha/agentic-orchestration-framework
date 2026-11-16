@@ -111,13 +111,36 @@ rag = RepoRAG(
 rag.build_or_load_index()
 _last_refresh = time.monotonic()
 _REFRESH_EVERY = float(SETTINGS["refresh_seconds"])
+_cfg_mtime = CONFIG_PATH.stat().st_mtime_ns
+
+
+def _reload_index_settings():
+    """Follow changes to what is indexed (e.g. components added or left for later on the setup
+    page) without a restart, so this server never rebuilds the graph with outdated settings."""
+    global _cfg_mtime
+    try:
+        mtime = CONFIG_PATH.stat().st_mtime_ns
+        if mtime == _cfg_mtime:
+            return
+        with open(CONFIG_PATH) as f:
+            cfg = yaml.safe_load(f) or {}
+    except (OSError, yaml.YAMLError) as e:
+        log(REPO_NAME, "WARN", f"config.yaml not reloaded ({type(e).__name__}); keeping the current settings")
+        return
+    _cfg_mtime = mtime
+    kw = _settings.rag_kwargs(cfg)
+    rag.update_config(_settings.roots(REPO_ROOT, cfg), cfg.get("file_types") or {}, cfg.get("structure") or [],
+                      cfg.get("extra_extensions") or [], exclude=kw["exclude"], max_file_bytes=kw["max_file_bytes"])
+    log(REPO_NAME, "INFO", "Indexing settings changed in config.yaml — applied at this refresh")
 
 
 def _fresh():
-    """Pick up edited files and re-published peer interfaces, at most once a minute."""
+    """Pick up edited files, changed indexing settings and re-published peer interfaces,
+    at most once a minute."""
     global _last_refresh
     if time.monotonic() - _last_refresh > _REFRESH_EVERY:
         _last_refresh = time.monotonic()
+        _reload_index_settings()
         rag.refresh()
 
 

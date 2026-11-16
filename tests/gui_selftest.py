@@ -591,12 +591,26 @@ def _run(a):
         extra = pg_dir / "extra-repo"
         (extra / "lib").mkdir(parents=True, exist_ok=True)
         (extra / "lib" / "helper.py").write_text("def helper():\n    return 1\n", encoding="utf-8")
+        (extra / "vendor").mkdir(exist_ok=True)
+        (extra / "vendor" / "blob.zzq").write_text("some vendor data\nmore data\n", encoding="utf-8")
+        code, sx = g.call("/api/scan", {"repos": [{"path": str(extra)}]})
+        ux = next((u for u in sx["repos"][0].get("unknown_types", []) if u["ext"] == ".zzq"), {})
+        check("review: an unknown file type says which folders it is in", ux.get("folders") == ["vendor"], str(ux.get("folders")))
+        ok, lines, _ = g.job("/api/configure", {"repos": [{"name": "extra-repo", "path": str(extra), "roles": [],
+                                                           "file_types": {}, "exclude": []},
+                                                          {"name": "sample-client", "path": str(cli_path), "roles": [], "file_types": {},
+                                                           "keep": ["instructions", "skill"]}]})
+        check("include/exclude: an unknown type in an included folder must still be classified",
+              not ok and ".zzq" in " ".join(lines[-12:]), (lines[-1] if lines else "")[-80:])
+        ok_bad, lines_bad, _ = g.job("/api/configure", {"repos": [{"name": "extra-repo", "path": str(extra), "roles": [],
+                                                                   "file_types": {}, "exclude": ["../outside"]}]})
+        check("include/exclude: a path outside the repository is refused", not ok_bad, (lines_bad[-1] if lines_bad else "")[-80:])
         keep_plan = [
             {"name": "sample-server", "path": str(srv_path), "roles": [{"path": "docs/**", "role": "example"}],
              "file_types": {u["ext"]: {"kind": u["kind"], "parse_as": u["parse_as"]} for u in by["sample-server"]["saved_types"]},
              "replace_roles": True, "reset_settings": True, "keep": []},
             {"name": "sample-client", "path": str(cli_path), "roles": [], "file_types": {}, "keep": ["instructions"]},
-            {"name": "extra-repo", "path": str(extra), "roles": [], "file_types": {}}]
+            {"name": "extra-repo", "path": str(extra), "roles": [], "file_types": {}, "exclude": ["vendor"]}]
         ok, lines, _ = g.job("/api/configure", {"repos": keep_plan})
         srv_cfg = read_yaml(srv_path / "mcp" / "config.yaml")
         cli_cfg = read_yaml(cli_path / "mcp" / "config.yaml")
@@ -612,6 +626,8 @@ def _run(a):
               cli_saved and cli_saved <= set(cli_cfg.get("file_types") or {}),
               ", ".join(sorted(cli_cfg.get("file_types") or {})))
         check("a third repository is connected", "extra-repo" in {r["name"] for r in g.call("/api/state")[1]["repos"]})
+        check("include/exclude: an excluded folder is saved, and its unknown file types are not asked",
+              read_yaml(extra / "mcp" / "config.yaml").get("exclude") == ["vendor"])
         code, bad = g.call("/api/configure", {"repos": [dict(keep_plan[1], keep=["everything"])]})
         check("an unknown item to keep is refused", code == 400, bad.get("error", "")[:60])
         ok, lines, _ = g.job("/api/configure", {"repos": [keep_plan[1]], "drop": ["extra-repo"]})

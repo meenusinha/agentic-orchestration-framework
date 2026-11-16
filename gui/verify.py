@@ -7,8 +7,10 @@ stage), then one {"event": "result", ...} with per-repo stats and the cross-repo
 Two passes: the first builds each graph and publishes its IDL interfaces, the
 second (fast) links every repo to its peers' interfaces.
 
-    verify.py [--fresh NAME ...]     NAME: start that repository's GraphRAG from scratch
-                                     (cached vectors are dropped too)"""
+    verify.py [--fresh NAME ...] [--plan JSON]
+      --fresh NAME   start that repository's GraphRAG from scratch (cached vectors are dropped too)
+      --plan JSON    {repo: {"parse": seconds, "embed": seconds}} from the page's estimate: weights
+                     the overall progress by the work each repository and stage really needs"""
 
 import os
 import sys
@@ -47,41 +49,65 @@ def emit(**kw):
     print(json.dumps(kw), flush=True)
 
 
-# Share of one repository's build taken by each stage — for the overall progress bar only.
-STAGES = {"read": (0.0, 0.05), "parse": (0.05, 0.25), "embed": (0.25, 0.95), "write": (0.95, 1.0)}
-PASS_SHARE = {1: (0.0, 0.9), 2: (0.9, 1.0)}         # building, then linking (fast: vectors are reused)
+STAGE_ORDER = ("read", "parse", "embed", "write")
+DEFAULT_WORK = {"parse": 1.0, "embed": 3.0}          # relative work per repository without an estimate
+
+
+def stage_work(work: dict, linking: bool) -> dict:
+    """Expected seconds of each stage of one repository's build. Reading and parsing are
+    measured together by the estimate; linking parses again and reuses every vector."""
+    parse, embed = max(work.get("parse", 0.0), 0.0), max(work.get("embed", 0.0), 0.0)
+    embed = 0.0 if linking else embed
+    return {"read": 0.15 * parse + 0.01, "parse": 0.85 * parse + 0.01, "embed": embed,
+            "write": 0.03 * (parse + embed) + 0.01}
 
 
 class Bar:
-    """Turns build progress into throttled bar events with an overall fraction and the time
-    left in the current stage (from the rate so far)."""
-    def __init__(self, n_repos: int, every: float = 0.4):
-        self.n, self.every, self.last, self.stage_t0, self.key = n_repos, every, 0.0, time.time(), None
+    """Turns build progress into throttled bar events: the overall fraction is weighted by the
+    work each repository and stage needs (from the page's estimate, else equal shares), and the
+    time left in the current stage comes from the rate so far."""
+    def __init__(self, repos: list, plan: dict | None = None, every: float = 0.4):
+        self.every, self.last, self.stage_t0, self.key = every, 0.0, time.time(), None
+        self.slots, self.total = {}, 0.0                 # (pass, repo, stage) → (start, length)
+        for p in (1, 2):
+            for name in repos:
+                w = stage_work((plan or {}).get(name) or DEFAULT_WORK, linking=p == 2)
+                for stage in STAGE_ORDER:
+                    self.slots[(p, name, stage)] = (self.total, w[stage])
+                    self.total += w[stage]
 
-    def hook(self, p: int, i: int, repo: str):
-        def progress(stage: str, done: int, total: int):
+    def overall(self, p: int, repo: str, stage: str, frac: float) -> float:
+        start, length = self.slots.get((p, repo, stage), (0.0, 0.0))
+        return min((start + length * min(max(frac, 0.0), 1.0)) / self.total, 1.0) if self.total else 0.0
+
+    def hook(self, p: int, repo: str):
+        def progress(stage: str, done: int, total: int, frac: float | None = None):
             now = time.time()
             if (p, repo, stage) != self.key:
                 self.key, self.stage_t0, self.last = (p, repo, stage), now, 0.0
-            finished = total and done >= total
+            finished = bool(total) and done >= total
             if now - self.last < self.every and not finished:
                 return
             self.last = now
-            lo, hi = STAGES.get(stage, (0.0, 1.0))
-            frac = lo + (hi - lo) * (done / total if total else 1.0)
-            plo, phi = PASS_SHARE[p]
-            overall = plo + (phi - plo) * (i + frac) / self.n
+            if frac is None:                             # embedding reports its share of the text itself
+                frac = done / total if total else 1.0
             elapsed = now - self.stage_t0
-            left = elapsed / done * (total - done) if done and total and elapsed > 2 else None
+            left = elapsed / frac * (1 - frac) if 0 < frac < 1 and elapsed > 2 else None
             emit(event="bar", repo=repo, phase="building" if p == 1 else "linking", stage=stage, done=done,
-                 total=total, overall=round(min(overall, 1.0), 4), stage_seconds_left=left)
+                 total=total, overall=round(self.overall(p, repo, stage, frac), 4), stage_seconds_left=left)
         return progress
 
 
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--fresh", action="append", default=[], metavar="NAME")
+    ap.add_argument("--plan", default="{}")
     args = ap.parse_args()
+    try:
+        plan = {str(k): {"parse": float(v.get("parse", 0)), "embed": float(v.get("embed", 0))}
+                for k, v in (json.loads(args.plan) or {}).items()}
+    except (ValueError, TypeError, AttributeError):
+        plan = {}
     import yaml
     cfg = yaml.safe_load((FW / "orchestrator" / "mcp" / "config.yaml").read_text()) or {}
     repos = [r for r in cfg.get("repos") or [] if not str(r.get("path", "")).startswith("/absolute/path/to/")]
@@ -94,8 +120,8 @@ def main():
     from codegraph import settings
     model = settings.model_dir(FW, cfg)
     peers = [{"name": r["name"], "path": str(Path(r["path"]).expanduser())} for r in repos]
-    rags, stats = {}, {}
-    bar = Bar(len(repos))
+    rags, stats, speeds = {}, {}, []
+    bar = Bar([r["name"] for r in repos], plan)
     for p in (1, 2):
         for i, r in enumerate(repos):
             root = Path(r["path"]).expanduser()
@@ -105,17 +131,22 @@ def main():
                 rags[r["name"]] = RepoRAG(r["name"], str(root), settings.roots(root, rc), embedding_model=str(model),
                                           file_types=rc.get("file_types"), structure=rc.get("structure"),
                                           extra_extensions=rc.get("extra_extensions"), peers=peers,
-                                          progress=bar.hook(p, i, r["name"]), **settings.rag_kwargs(rc))
+                                          progress=bar.hook(p, r["name"]), **settings.rag_kwargs(rc))
                 if r["name"] in args.fresh:
                     emit(event="progress", msg=f"Starting {r['name']} from scratch (stored graph and vectors removed) …")
                     rags[r["name"]].clear_index()
-            rags[r["name"]].progress = bar.hook(p, i, r["name"])
+            rags[r["name"]].progress = bar.hook(p, r["name"])
             stats[r["name"]] = st = rags[r["name"]].build_or_load_index() or {}
+            if p == 1 and st.get("speed"):
+                speeds.append(st["speed"])
             if st.get("rebuilt"):
                 emit(event="progress", msg=f"  {r['name']}: {st['files']} files, {st['nodes']} units — "
                                           f"{st.get('embedded', 0)} embedded, {st.get('reused', 0)} reused")
             else:
                 emit(event="progress", msg=f"  {r['name']}: up to date ({st.get('files', 0)} files)")
+    import buildspeed
+    if speeds and buildspeed.record(speeds, next(iter(rags.values()))._model_sha):
+        emit(event="progress", msg="This computer's build speed recorded for later time estimates")
     out, imap = [], {}
     for r in repos:
         rag = rags[r["name"]]

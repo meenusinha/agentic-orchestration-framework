@@ -33,6 +33,7 @@ Supported platforms: **Windows and Linux**.
 | `search.py` | Hybrid ranking (vectors + keywords), interface tracing, impact analysis, whole-unit result assembly |
 | `security.py` | Secret-file exclusion and redaction |
 | `settings.py` | Every creation, query and router setting with its default and range; used by every program that builds or searches a graph, so they always build identical graphs |
+| `embedcost.py` | Cost of embedding a text relative to its length (measured: grows with the square of the length, constant beyond the model's 8192-token limit); used by the progress bar and the time estimate |
 | `components.py` | Divides a repository into components (top-level folders; a folder holding most of a large repository is split into its sub-folders) for the time estimate and for building in batches |
 
 ### Setup page workers
@@ -42,8 +43,9 @@ Each prints JSON lines (progress, then one result) that the page streams.
 
 | Worker | Responsibility |
 |---|---|
-| `gui/estimate.py` | Read-only: lists the files to index per component, marks those already in the GraphRAG with unchanged content, and parses and embeds a sample of about 150 KB of real code with the real model, giving seconds per byte for parsing and for embedding on this computer |
-| `gui/verify.py` | Builds (pass 1) and links (pass 2) every graph; reports progress-bar events (repository, stage, done/total, overall fraction, time left in the stage); `--fresh NAME` starts a repository from scratch |
+| `gui/estimate.py` | Read-only: lists the files to index per component, marks those already in the GraphRAG with unchanged content, resolves folder roles (tests are not embedded), and parses a sample of up to 240 KB spread over every component. The sample gives the embedding work per source byte; the seconds per unit of work come from the last recorded build, or from embedding the sample with the real model |
+| `gui/buildspeed.py` | Records each larger build's real speed (seconds per byte parsed, seconds per unit of embedding work) in `~/.agentic-orchestration/build-speed.json`, numbers only, for later estimates |
+| `gui/verify.py` | Builds (pass 1) and links (pass 2) every graph; reports progress-bar events (repository, stage, done/total, overall fraction weighted by the estimate's expected work per repository and stage, time left in the stage); `--fresh NAME` starts a repository from scratch |
 | `gui/query_worker.py` | Loads the model and all graphs once and answers the query field |
 
 ---
@@ -127,7 +129,9 @@ roughly 0.75 GB × (number of connected repositories) per open window.
   builder (the MCP servers, the router, the query field and step 6), so all of them build
   the same graph. Adding a component later changes the configuration fingerprint: the
   graph is rebuilt, and only the new component's units are embedded; every other vector
-  comes from the embedding cache.
+  comes from the embedding cache. A running repository server re-reads its `config.yaml`
+  at each refresh and follows a changed selection, so it never rebuilds with outdated
+  settings.
 - **Starting from scratch.** Step 6's *start from scratch* empties the repository's
   `graph.sqlite` in one exclusive transaction, cached vectors included, instead of deleting
   the file. This also works while VS Code servers have it open.

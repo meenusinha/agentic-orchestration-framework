@@ -394,6 +394,11 @@ def configure_cmd(body: dict) -> list:
             cmd += ["--file-type", f"{n}={ext}:{ft['kind']}" + (f":{ft['parse_as']}" if ft.get("parse_as") else "")]
         for role in r.get("roles") or []:
             cmd += ["--role", f"{n}={role['path']}:{role['role']}" + (f":{role['index']}" if role.get("index") else "")]
+        if "exclude" in r:                              # folders/patterns never indexed ([] = none)
+            if not isinstance(r["exclude"], list) or any(not isinstance(g, str) for g in r["exclude"]):
+                raise ValueError(f"{n}: exclude must be a list of paths")
+            cmd += [a for g in r["exclude"] if g.strip() for a in ("--exclude", f"{n}={g.strip()}")] or \
+                ["--exclude", f"{n}="]
         if r.get("replace_roles"):
             cmd += ["--replace-roles", n]
         if r.get("reset_settings"):
@@ -517,9 +522,12 @@ def job_model_path(body):
 
 def run_worker(job, script: str, args=()) -> dict:
     """Run a gui/ worker that prints JSON lines: progress messages go to the log, progress-bar
-    events to job.progress; returns its result."""
+    events to job.progress; returns its result. If the worker dies without a result (e.g. out
+    of memory), the end of its error output is reported."""
+    import tempfile
+    errf = tempfile.TemporaryFile(mode="w+", encoding="utf-8", errors="replace")
     p = subprocess.Popen([sys.executable, str(GUI / script), *args], stdout=subprocess.PIPE,
-                         stderr=subprocess.DEVNULL, text=True, bufsize=1, encoding="utf-8", errors="replace")
+                         stderr=errf, text=True, bufsize=1, encoding="utf-8", errors="replace")
     result = None
     for line in p.stdout:
         try:
@@ -533,8 +541,14 @@ def run_worker(job, script: str, args=()) -> dict:
         elif msg.get("event") == "result":
             result = msg
     p.wait()
-    if not result or not result.get("ok"):
-        raise RuntimeError((result or {}).get("error") or f"{script} failed")
+    if not result:
+        errf.seek(0)
+        tail = [l for l in errf.read().splitlines() if l.strip()][-3:]
+        errf.close()
+        raise RuntimeError(f"{script} stopped (exit code {p.returncode})" + (": " + " | ".join(tail) if tail else ""))
+    errf.close()
+    if not result.get("ok"):
+        raise RuntimeError(result.get("error") or f"{script} failed")
     return result
 
 
@@ -544,13 +558,15 @@ def job_estimate(job):
     return result
 
 
-def set_deferred(deferred: dict) -> list:
-    """Write each repository's `deferred` setting: the components left for a later batch.
-    → names of the repositories whose setting changed."""
+def plan_deferred(deferred: dict) -> list:
+    """Validate each repository's components left for a later batch.
+    → [(config path, new `deferred` value)] for the repositories whose setting changes."""
     import yaml
     from codegraph import components
     repos = {r["name"]: r for r in configured_repos()}
-    changed = []
+    if not isinstance(deferred or {}, dict):
+        raise ValueError("deferred must map repositories to folders")
+    changes = []
     for name, paths in (deferred or {}).items():
         if name not in repos:
             raise ValueError(f"unknown repository {name!r}")
@@ -562,25 +578,48 @@ def set_deferred(deferred: dict) -> list:
         p = repo_cfg_path(repos[name])
         text = p.read_text(encoding="utf-8") if p.exists() else ""
         if settings.load(yaml.safe_load(text) or {})["deferred"] != clean["deferred"]:
-            p.write_text(set_yaml_key(text, "deferred", clean["deferred"]), encoding="utf-8")
-            changed.append(name)
-    return changed
+            set_yaml_key(text, "deferred", clean["deferred"])          # refuses values it can't write safely
+            changes.append((name, p, clean["deferred"]))
+    return changes
+
+
+def write_deferred(changes: list) -> None:
+    for _, p, value in changes:
+        text = p.read_text(encoding="utf-8") if p.exists() else ""
+        p.write_text(set_yaml_key(text, "deferred", value), encoding="utf-8")
+
+
+def clean_plan(plan) -> dict:
+    """Expected seconds per repository from the page's estimate (weights the progress bar)."""
+    names = {r["name"] for r in configured_repos()}
+    out = {}
+    for name, w in (plan or {}).items() if isinstance(plan, dict) else ():
+        try:
+            if name in names:
+                out[name] = {k: min(max(float(w.get(k, 0)), 0.0), 1e7) for k in ("parse", "embed")}
+        except (TypeError, ValueError, AttributeError):
+            continue
+    return out
 
 
 def job_verify(body=None):
-    """Create or update the GraphRAG. Optional body: deferred {repo: [components left for later]}
-    and fresh [repos to start from scratch]."""
+    """Create or update the GraphRAG. Optional body: deferred {repo: [components left for later]},
+    fresh [repos to start from scratch] and plan {repo: {parse, embed seconds}} for the progress bar.
+    Everything is validated before the job starts; the batch is saved only when it runs."""
     body = body or {}
     names = {r["name"] for r in configured_repos()}
     fresh = [n for n in body.get("fresh") or [] if n in names]
-    changed = set_deferred(body.get("deferred"))        # invalid selections are refused before the job
+    changes = plan_deferred(body.get("deferred"))
+    plan = clean_plan(body.get("plan"))
 
     def run(job):
         WORKER.stop()                                   # nobody else holds the graphs while they're built
         GRAPH.reset()
-        if changed:
-            job.log("Components for this batch saved for " + ", ".join(changed))
-        result = run_worker(job, "verify.py", [a for n in fresh for a in ("--fresh", n)])
+        if changes:
+            write_deferred(changes)
+            job.log("Components for this batch saved for " + ", ".join(n for n, _, _ in changes))
+        result = run_worker(job, "verify.py", [a for n in fresh for a in ("--fresh", n)] +
+                            (["--plan", json.dumps(plan)] if plan else []))
         job.log("✓ GraphRAG created and linked")
         WORKER.stop()                                   # next query loads the fresh graphs
         GRAPH.reset()

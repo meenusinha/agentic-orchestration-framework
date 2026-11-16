@@ -20,6 +20,7 @@ import time
 from pathlib import Path, PurePosixPath
 
 from . import interfaces as ifc
+from .embedcost import work as embed_work
 from .extract import language_for, extract
 from .model import (CLASS, CONTAINERS, DOC_SECTION, FIELD, FILE, FUNCTION, FUNCTION_DECL, IDL_ATTRIBUTE,
                     IDL_INTERFACE, IDL_OPERATION, IDL_TYPE, MACRO, METHOD, MODULE, NAMESPACE, TARGET, TEXT, TYPE,
@@ -154,7 +155,7 @@ def _looks_textual(path: Path) -> bool:
     return b"\x00" not in head and bool(head.strip())
 
 
-def _no_progress(stage: str, done: int, total: int) -> None:
+def _no_progress(*args, **kwargs) -> None:
     pass
 
 
@@ -163,6 +164,7 @@ def build(cfg: IndexConfig, store: Store, embedder, model_sha: str, log=lambda *
     """progress(stage, done, total) is called as work advances: stages "read", "parse",
     "embed" (reported by the embedder itself) and "write"."""
     t0 = time.time()
+    t_start = time.perf_counter()                       # reading + parsing + linking, for the speed record
     files, unknown, secret_files = collect_files(cfg)
     hashes = {}
     sources = {}
@@ -241,6 +243,7 @@ def build(cfg: IndexConfig, store: Store, embedder, model_sha: str, log=lambda *
         e.src = tmap.get(e.src, e.src)
         edges.append(e)
 
+    parse_seconds = time.perf_counter() - t_start      # reading, parsing, structure and links
     # ── embeddings (only new/changed text) ───────────────────────────────────
     all_nodes = [n for r in trees.values() for n in r.walk()] + target_nodes
     to_embed = {}
@@ -251,12 +254,14 @@ def build(cfg: IndexConfig, store: Store, embedder, model_sha: str, log=lambda *
     shas = {uid: hashlib.sha256(t.encode()).hexdigest() for uid, t in to_embed.items()}
     cached = store.cached_embeddings(set(shas.values()))
     missing = {sha: to_embed[uid] for uid, sha in shas.items() if sha not in cached}
-    new_vecs = {}
+    new_vecs, embed_seconds = {}, 0.0
     if missing and embedder is not None:
+        t_embed = time.perf_counter()
         log("INDEX", f"Embedding {len(missing)} new/changed node(s) ({len(cached)} reused)...")
         items = sorted(missing.items(), key=lambda kv: len(kv[1]))   # length-sorted batches are faster
         vecs = embedder([t for _, t in items])
         new_vecs = {sha: v for (sha, _), v in zip(items, vecs)}
+        embed_seconds = time.perf_counter() - t_embed
 
     # ── write ────────────────────────────────────────────────────────────────
     progress("write", 0, 1)
@@ -311,6 +316,9 @@ def build(cfg: IndexConfig, store: Store, embedder, model_sha: str, log=lambda *
                     "(classify them in mcp/config.yaml → file_types)")
     return {"rebuilt": True, "files": len(trees), "nodes": len(all_nodes), "edges": len(edges),
             "embedded": len(new_vecs), "reused": len(cached),
+            # this computer's real speed, for later time estimates
+            "speed": {"parse_seconds": parse_seconds, "parse_bytes": sum(len(t) for t, _ in sources.values()),
+                      "embed_seconds": embed_seconds, "embed_work": sum(embed_work(len(t)) for t in missing.values())},
             "unclassified": {k: v[:5] for k, v in unknown.items()}}
 
 
