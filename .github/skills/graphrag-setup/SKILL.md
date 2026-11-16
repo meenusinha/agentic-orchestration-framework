@@ -1,6 +1,6 @@
 ---
 name: graphrag-setup
-description: Set up the Agentic Orchestration framework and create its GraphRAG (cross-repository code knowledge graph) from Copilot Chat, without the setup page — install it, connect repositories, choose which folders to index or exclude, answer unknown file types and folder roles, configure VS Code, estimate how long creating the GraphRAG takes, create it all at once or in batches with a progress bar, add the remaining batches later, or start a repository from scratch. Use when the developer asks to set up, configure, build, rebuild, extend or check the GraphRAG or the cross-repo MCP servers, to include or exclude folders, or to see how long indexing takes.
+description: Set up the Agentic Orchestration framework and create its GraphRAG (cross-repository code knowledge graph) from Copilot Chat, without the setup page — install it, connect repositories, choose which folders to index or exclude, answer unknown file types and folder roles, choose the chunking method (knowledge graph, sliding window, hybrid; chunk size and overlap), define content that must never be indexed (file headers with author or date, regular expressions), configure VS Code, estimate how long creating the GraphRAG takes, create it all at once or in batches with a progress bar, add the remaining batches later, or start a repository from scratch. Use when the developer asks to set up, configure, build, rebuild, extend or check the GraphRAG or the cross-repo MCP servers, to include or exclude folders, or to see how long indexing takes.
 license: Apache-2.0
 ---
 
@@ -108,6 +108,39 @@ PY SCRIPTS/configure.py --framework <framework> \
 It refuses to start while an unknown file type in an included folder is unanswered, and
 writes nothing until every argument is valid.
 
+## 4b. How to index: chunking and skip rules
+
+Once `configure.py` has run, each repository can be tuned with two commands. Ask the
+developer, and explain the choices briefly; the defaults are fine for most repositories.
+
+**Chunking** — `PY GR chunking name --mode graph|sliding|hybrid [--lines N] [--overlap N]`
+
+| Mode | What it means |
+|---|---|
+| `graph` (default) | Whole functions, classes, IDL operations and documentation sections, never cut |
+| `sliding` | Every file in chunks of N lines overlapping by M lines; results are chunks with their line range, still linked to the code they cover |
+| `hybrid` | Whole units as results, but long units are also searched in overlapping windows |
+
+Calls, IDL links and tests are built in every mode. The overlap must be smaller than the size.
+
+**Skip rules** — content that must never be indexed, such as file headers with author names and
+creation dates:
+
+```bash
+PY GR skip name --header-word Author --header-word Created --preview-only     # see what it would remove
+PY GR skip name --header-word Author --header-word Created                    # then save it
+PY GR skip name --pattern '^\s*// \$Id:.*$'                                    # a regular expression (multi-line)
+PY GR skip name --clear                                                        # remove every rule
+```
+
+- A header rule skips the comment block at the top of a file (`/* */`, `//`, `#`, `--`, `%`, `;`,
+  or a Python docstring) if it contains any of the words.
+- Always show the developer the preview (files matched, an example) and save only when they agree.
+- Skipped text is blanked, so line numbers stay correct; it never reaches the GraphRAG.
+- Patterns that could take extremely long, such as `(a+)+`, are refused; suggest a simpler one.
+
+Both take effect at the next `build`.
+
 ## 5. Estimate
 
 ```bash
@@ -166,6 +199,8 @@ use Copilot Chat in Agent mode with `/cross-repo-feature-analysis`.
 |---|---|
 | See the state | `PY GR status` |
 | Exclude or include a folder | `PY GR folders name --exclude PATH` / `--include PATH` (or `--exclude-all` / `--include-all`), then `PY GR build` |
+| Change the chunking | `PY GR chunking name --mode … --lines … --overlap …`, then `PY GR build` |
+| Never index some content | `PY GR skip name --header-word … / --pattern … --preview-only`, then without `--preview-only`, then `PY GR build` |
 | Add components left for later | `PY GR build --add repo:component …` or `--all` |
 | Leave a component for later | `PY GR build --later repo:component` (its vectors are dropped; re-adding embeds it again) |
 | Rebuild one repository completely | `PY GR build --fresh name` |

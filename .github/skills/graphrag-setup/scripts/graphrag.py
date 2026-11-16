@@ -12,6 +12,11 @@ Commands:
                                  components left for later
   folders REPO [--exclude PATH …] [--include PATH …] [--exclude-all] [--include-all]
                                  folders to index (an excluded folder is never indexed)
+  chunking REPO [--mode graph|sliding|hybrid] [--lines N] [--overlap N]
+                                 how code is cut into searchable pieces (shown without options)
+  skip REPO [--header-word W …] [--pattern REGEX …] [--clear] [--preview-only]
+                                 content never indexed: a preview of what the rules remove,
+                                 then saved (unless --preview-only)
   estimate                       time to create the GraphRAG, per component, measured on this
                                  computer; suggests a first batch when everything is long
   build [--all | --only R:C … | --add R:C … | --later R:C … | --suggested] [--fresh REPO …]
@@ -181,6 +186,10 @@ def cmd_status(ops, _args) -> int:
         print(f"\n  {r['name']}  {root}\n    {graph}")
         print(f"    Excluded (never indexed): {', '.join(s['exclude']) or 'none'}")
         print(f"    Left for a later batch:   {', '.join(from_setting(d) for d in s['deferred']) or 'none'}")
+        print(f"    Chunking:                 {s['chunking']}" + ("" if s["chunking"] == "graph" else
+              f" ({s['chunk_lines']} lines, {s['chunk_overlap']} overlap)"))
+        print(f"    Skip rules:               header words: {', '.join(s['skip_header_words']) or 'none'}; "
+              f"patterns: {len(s['skip_patterns'])}")
     return 0
 
 
@@ -226,6 +235,66 @@ def cmd_folders(ops, args) -> int:
     print("  Top-level files are always indexed.")
     if others:
         print(f"  Also excluded: {', '.join(others)}")
+    return 0
+
+
+def save_values(ops, repo: str, values: dict) -> bool:
+    try:
+        changes = ops.plan_values(repo, values)
+    except ValueError as e:
+        sys.exit(f"ERROR: {e}")
+    ops.write_settings(changes)
+    if changes:
+        print("Saved. The GraphRAG is rebuilt with it at the next `build` (vectors of unchanged text are reused); "
+              "VS Code servers that are running follow at their next refresh.")
+    return bool(changes)
+
+
+def cmd_chunking(ops, args) -> int:
+    r = repo_by_name(ops, args.repo)
+    values = {k: v for k, v in (("chunking", args.mode), ("chunk_lines", args.lines),
+                                ("chunk_overlap", args.overlap)) if v is not None}
+    if values:
+        save_values(ops, r["name"], values)
+    s = ops.settings.load(ops.repo_cfg(r))
+    print(f"Chunking of {r['name']}: {s['chunking']}" + ("" if s["chunking"] == "graph" else
+          f" — {s['chunk_lines']} lines per chunk, {s['chunk_overlap']} lines overlap"))
+    print({"graph": "  whole functions, classes, IDL operations and documentation sections, never cut",
+           "sliding": "  every file in overlapping chunks; results are chunks with their line range",
+           "hybrid": "  whole units as results; long units are also searched in overlapping windows"}[s["chunking"]])
+    return 0
+
+
+def cmd_skip(ops, args) -> int:
+    r = repo_by_name(ops, args.repo)
+    s = ops.settings.load(ops.repo_cfg(r))
+    words = [] if args.clear else list(s["skip_header_words"])
+    patterns = [] if args.clear else list(s["skip_patterns"])
+    words += [w for w in args.header_word or [] if w not in words]
+    patterns += [p for p in args.pattern or [] if p not in patterns]
+    if words or patterns:
+        print(f"Checking every file of {r['name']} …", flush=True)
+        try:
+            res = ops.preview_skip_rules(r["name"], words, patterns)
+        except RuntimeError as e:
+            sys.exit(f"ERROR: {e}")
+        print(f"  {'rule':40s} {'files':>6s} {'blocks':>7s} {'lines':>7s}")
+        for x in res["rules"]:
+            label = ("header words: " + ", ".join(words)) if x["rule"] == "header" else \
+                f"{x['rule']}: {patterns[int(x['rule'].split()[1]) - 1]}"
+            print(f"  {label[:40]:40s} {x['files']:6d} {x['blocks']:7d} {x['lines']:7d}")
+            if x["example"]:
+                e = x["example"]
+                print(f"    e.g. {e['file']}:{e['lines'][0]}-{e['lines'][1]}")
+                for line in e["text"].splitlines():
+                    print("      | " + line[:120])
+        print(f"  ({res['files_checked']} files checked)")
+    else:
+        print(f"No skip rules for {r['name']}.")
+    if args.preview_only:
+        print("Preview only — nothing saved.")
+        return 0
+    save_values(ops, r["name"], {"skip_header_words": words, "skip_patterns": patterns})
     return 0
 
 
@@ -397,6 +466,17 @@ def main() -> int:
     f.add_argument("--include", action="append", metavar="PATH", help="index an excluded folder again")
     f.add_argument("--exclude-all", action="store_true", help="exclude every top-level folder")
     f.add_argument("--include-all", action="store_true", help="remove every exclusion")
+    c = sub.add_parser("chunking", help="how code is cut into searchable pieces")
+    c.add_argument("repo")
+    c.add_argument("--mode", choices=("graph", "sliding", "hybrid"))
+    c.add_argument("--lines", type=int, help="chunk (window) size in lines")
+    c.add_argument("--overlap", type=int, help="lines shared by neighbouring chunks")
+    k = sub.add_parser("skip", help="content never indexed (header words, regular expressions)")
+    k.add_argument("repo")
+    k.add_argument("--header-word", action="append", metavar="W", help="skip the top-of-file comment block containing W")
+    k.add_argument("--pattern", action="append", metavar="REGEX", help="skip every match (multi-line mode)")
+    k.add_argument("--clear", action="store_true", help="remove the existing rules first")
+    k.add_argument("--preview-only", action="store_true", help="show what would be skipped; save nothing")
     e = sub.add_parser("estimate", help="time to create the GraphRAG, per component")
     e.add_argument("--json", action="store_true", help="print the raw estimate as JSON")
     b = sub.add_parser("build", help="create or update the GraphRAG, with a progress bar")
@@ -410,7 +490,8 @@ def main() -> int:
     _require_supported_os("graphrag.py")
     _require_venv("graphrag.py")
     ops = _ops()
-    return {"status": cmd_status, "folders": cmd_folders, "estimate": cmd_estimate, "build": cmd_build}[args.cmd](ops, args)
+    return {"status": cmd_status, "folders": cmd_folders, "chunking": cmd_chunking, "skip": cmd_skip,
+            "estimate": cmd_estimate, "build": cmd_build}[args.cmd](ops, args)
 
 
 if __name__ == "__main__":

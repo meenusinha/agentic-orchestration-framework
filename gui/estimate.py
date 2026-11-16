@@ -143,6 +143,7 @@ def survey(repo: dict, tick) -> dict:
                       "state": "indexed" if rels and n_cached == len(rels) else "partly" if n_cached else "new",
                       "deferred": c.path in deferred, "always": c.path == components.ALWAYS})
     return {"name": repo["name"], "path": str(root), "graph_exists": bool(stored), "components": comps,
+            "chunking": s["chunking"], "_index": settings.index_kwargs(rc),     # how a build cuts and skips
             "excluded": list(s["exclude"]),                # never indexed (step 4 / Settings)
             "files": len(sized), "bytes": sum(x[3] for x in sized),
             "_sample_pool": [(rel, ab, lang, size) for rel, ab, lang, size in sized       # what a build embeds
@@ -159,7 +160,9 @@ def pick_sample(pools: list[list]) -> list:
         for rel, ab, lang, size in pool:
             key = f"{n}|" + "/".join(rel.split("/")[:2])
             buckets.setdefault(key, []).append((hashlib.sha1(str(ab).encode()).hexdigest(), rel, ab, lang, size))
-    queues = [sorted(v) for _, v in sorted(buckets.items(), key=lambda kv: hashlib.sha1(kv[0].encode()).hexdigest())]
+    ordered = sorted(buckets.items(), key=lambda kv: hashlib.sha1(kv[0].encode()).hexdigest())
+    queues = [sorted(v) for _, v in ordered]
+    q_key = {id(q): k for q, (k, _) in zip(queues, ordered)}       # which repository each queue belongs to
     out, total = [], 0
     while queues and len(out) < SAMPLE_FILES and total < SAMPLE_BYTES:
         for q in list(queues):
@@ -167,36 +170,47 @@ def pick_sample(pools: list[list]) -> list:
                 queues.remove(q)
                 continue
             _, rel, ab, lang, size = q.pop(0)
-            out.append((rel, ab, lang, size))
+            out.append((rel, ab, lang, size, int(q_key[id(q)].split("|")[0])))
             total += size
             if len(out) >= SAMPLE_FILES or total >= SAMPLE_BYTES:
                 break
     return out
 
 
-def measure(sample: list, embed, tick, recorded: dict | None = None) -> dict:
+def measure(sample: list, embed, tick, recorded: dict | None = None, index_opts: list | None = None) -> dict:
     """Parse and embed the sample exactly as a build does → seconds per source byte for parsing
     and for embedding. With a recorded real build, its speed is used and the sample only
     contributes how much embedding work each byte of this code means."""
     from codegraph.embedcost import work as embed_work
     from codegraph.extract import extract
-    from codegraph.indexer import EMBED_KINDS, _embed_text
-    from codegraph.model import FILE
+    from codegraph import chunking
+    from codegraph.indexer import _embed_text
+    from codegraph.skiprules import SkipRules
     from codegraph.security import redact
     if not sample:
         return dict(DEFAULT_RATES, sample_files=0, sample_bytes=0, source="default")
     tick(f"Reading a sample of {len(sample)} files (speed from this computer's last build) …" if recorded else
          f"Measuring this computer's speed on {len(sample)} sample files …", force=True)
     texts, nbytes = [], 0
+    per_repo: dict[int, list] = {}                    # repository → [embedding work, source bytes]
     t0 = time.perf_counter()
-    for rel, ab, lang, size in sample:
-        try:
-            text, _ = redact(ab.read_bytes().decode("utf-8", "replace"))
+    for rel, ab, lang, size, ri in sample:
+        o = (index_opts or [{}] * (ri + 1))[ri] if index_opts and ri < len(index_opts) else {}
+        mode = o.get("chunking", "graph")
+        try:                                          # exactly what a build does with this file
+            text = ab.read_bytes().decode("utf-8", "replace")
+            text = SkipRules(o.get("skip_header_words") or [], o.get("skip_patterns") or []).apply(text)[0]
+            text, _ = redact(text)
             tree = extract(rel, text, lang)
+            chunking.add_chunks(tree, text, mode, o.get("chunk_lines", 60), o.get("chunk_overlap", 15))
         except Exception:
             continue
         nbytes += size
-        texts += [_embed_text(n) for n in tree.walk() if n.kind in EMBED_KINDS and n.kind != FILE]
+        mine = [_embed_text(n) for n in tree.walk() if chunking.embeddable(n, mode)]
+        texts += mine
+        w = per_repo.setdefault(ri, [0.0, 0])
+        w[0] += sum(embed_work(len(x)) for x in mine)
+        w[1] += size
     parse_s = time.perf_counter() - t0
     embed_s = 0.0
     if not recorded:                                  # a recorded build's speed makes this unnecessary
@@ -208,7 +222,9 @@ def measure(sample: list, embed, tick, recorded: dict | None = None) -> dict:
     nbytes = max(nbytes, 1)
     work = sum(embed_work(len(t)) for t in texts) or 1.0
     out = {"sample_files": len(sample), "sample_bytes": nbytes, "sample_units": len(texts),
-           "sample_parse": parse_s / nbytes, "sample_embed": embed_s / nbytes}
+           "sample_parse": parse_s / nbytes, "sample_embed": embed_s / nbytes,
+           # embedding work per byte of each repository, relative to the whole sample (chunking modes differ)
+           "repo_factor": {ri: (w / b) / (work / nbytes) for ri, (w, b) in per_repo.items() if b and work}}
     if recorded:
         out.update(parse=recorded["parse_seconds_per_byte"],
                    embed=recorded["embed_seconds_per_work"] * work / nbytes, source="build",
@@ -239,7 +255,12 @@ def main():
     load_s = time.perf_counter() - t0
     import buildspeed
     rates = measure(pick_sample([s.pop("_sample_pool") for s in surveys]), rag._embed, tick,
-                    buildspeed.load(rag._model_sha))
+                    buildspeed.load(rag._model_sha), [s.pop("_index") for s in surveys])
+    for ri, s in enumerate(surveys):                  # scale each repository's embedding work by its mode
+        f = rates.get("repo_factor", {}).get(ri, 1.0)
+        for c in s["components"]:
+            c["embed_bytes"], c["embed_bytes_all"] = round(c["embed_bytes"] * f), round(c["embed_bytes_all"] * f)
+    rates.pop("repo_factor", None)
     rates["model_load"] = load_s
     emit(event="result", ok=True, repos=surveys, rates=rates)
 

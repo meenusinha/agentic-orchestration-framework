@@ -49,6 +49,7 @@ button.primary{background:var(--accent);border-color:var(--accent);color:var(--a
 button.primary:hover:not(:disabled){background:var(--accent2);border-color:var(--accent2)}
 button:disabled{opacity:.45;cursor:not-allowed}button.link{border:0;background:none;color:var(--accent);padding:0;box-shadow:none;font-weight:500}
 button.link:hover:not(:disabled){background:none;text-decoration:underline}
+textarea.rx{width:100%;font:12.5px/1.5 ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;padding:8px 11px;border-radius:9px;border:1px solid var(--line);resize:vertical}
 select,input[type=text]{font:inherit;font-size:14px;padding:8px 11px;border-radius:9px;border:1px solid var(--line);background:#fff;color:var(--ink);max-width:100%;transition:border-color .15s,box-shadow .15s}
 select:focus,input[type=text]:focus{outline:none;border-color:#93c5fd;box-shadow:var(--ring)}input::placeholder{color:#94a3b8}
 select.need{border-color:var(--bad);box-shadow:0 0 0 3px rgba(220,38,38,.12)}
@@ -245,7 +246,10 @@ color:var(--muted);font-size:10.5px;font-weight:700;vertical-align:1px}.tip:focu
       <p class="sub">How the GraphRAG is created and how queries behave. Hover over a setting (or its <span class="tip">i</span>) to see what it does. Every value shows its default. Creation settings take effect when the GraphRAG is rebuilt; query settings take effect immediately on this page, and in Copilot after reloading VS Code.</p>
       <div class="row" style="margin-bottom:12px"><label for="setRepo" class="small">Repository</label><select id="setRepo"></select>
         <label class="small"><input type="checkbox" id="setAll"> apply to all repositories</label></div>
-      <div class="card"><h3>GraphRAG creation</h3><div class="sgrid" id="setCreation"></div></div>
+      <div class="card"><h3>GraphRAG creation</h3><div class="sgrid" id="setCreation"></div>
+        <div class="row" style="margin-top:12px"><button id="skipPreview">Preview skip rules</button>
+          <span class="small">Shows which files the header words and patterns above would affect, and an example of what they remove — before you save.</span></div>
+        <div id="skipResult"></div></div>
       <div class="card"><h3>Queries</h3><div class="sgrid" id="setQuery"></div>
         <div style="margin-top:12px" class="small"><span class="tipwrap" id="setWeightsHelp" data-tip="">Ranking weight per folder role (0 = never returned)<span class="tip" tabindex="0" aria-label="">i</span></span></div><div class="wgrid" id="setWeights" style="margin-top:6px"></div></div>
       <div class="card"><h3>Router <span class="small">(all repositories)</span></h3><div class="sgrid" id="setRouter"></div></div>
@@ -957,12 +961,18 @@ let SET = null;
 function fieldHtml(sp, value) {
   const id = "s_" + sp.key, def = Array.isArray(sp.default) ? (sp.default.join(", ") || "none") : sp.default;
   const v = Array.isArray(value) ? value.join(", ") : value;
+  const placeholder = {paths: "path, path …", words: "e.g. Author, Created, Date, Copyright"}[sp.kind] || "comma-separated";
   const input = sp.kind === "int"
     ? `<input type="number" id="${id}" value="${esc(v)}" min="${sp.min}" max="${sp.max}" step="1">`
-    : `<input type="text" id="${id}" value="${esc(v)}" placeholder="${sp.kind === "paths" ? "path, path …" : "comma-separated"}">`;
+    : sp.kind === "choice"
+    ? `<select id="${id}">${(sp.min || []).map(o => `<option ${o === value ? "selected" : ""}>${esc(o)}</option>`).join("")}</select>`
+    : sp.kind === "regexes"           // one per line: regular expressions may contain commas
+    ? `<textarea id="${id}" class="rx" rows="3" placeholder="one regular expression per line, e.g. ^\\s*// \\$Id:.*$">${esc((value || []).join("\n"))}</textarea>`
+    : `<input type="text" id="${id}" value="${esc(v)}" placeholder="${placeholder}">`;
   const help = esc(sp.help || sp.label);
+  const range = sp.kind === "int" ? ` · ${sp.min}–${sp.max}` : sp.kind === "choice" ? ` · ${(sp.min || []).join(" / ")}` : "";
   return `<label for="${id}" class="tipwrap" data-tip="${help}">${esc(sp.label)}<span class="tip" tabindex="0" aria-label="${help}">i</span>
-    <div class="hintd">default ${esc(def)}${sp.kind === "int" ? ` · ${sp.min}–${sp.max}` : ""}</div></label>${input.replace("<input ", `<input title="${help}" `)}`;
+    <div class="hintd">default ${esc(def)}${range}</div></label>${input.replace(/^<(\w+) /, `<$1 title="${help}" `)}`;
 }
 function fillSettings() {
   const r = SET.repos.find(x => x.name === $("#setRepo").value) || SET.repos[0]; if (!r) return;
@@ -986,7 +996,8 @@ async function showSettings() {
 function readSettings() {
   const out = {}, rout = {};
   const val = (sp) => { const el = $("#s_" + sp.key); if (!el) return undefined;
-    if (sp.kind === "int") return el.value.trim();
+    if (sp.kind === "int" || sp.kind === "choice") return el.value.trim();
+    if (sp.kind === "regexes") return el.value.split("\n").map(x => x.trim()).filter(Boolean);
     const parts = el.value.split(",").map(x => x.trim()).filter(Boolean);
     return sp.kind === "paths" ? (parts.length === 1 ? parts[0] : parts) : parts; };
   SET.spec.filter(x => x.kind !== "weights").forEach(sp => { out[sp.key] = val(sp); });
@@ -1025,6 +1036,22 @@ $("#setSave").onclick = async () => {
     $("#setResult").innerHTML = `<div class="status"><b class="warn">●</b><span class="bad">${esc(msg)}</span></div>`;
   }
   $("#setSave").disabled = false;
+};
+
+/* skip rules: preview before saving */
+$("#skipPreview").onclick = async () => {
+  const words = ($("#s_skip_header_words")?.value || "").split(",").map(x => x.trim()).filter(Boolean);
+  const patterns = ($("#s_skip_patterns")?.value || "").split("\n").map(x => x.trim()).filter(Boolean);
+  if (!words.length && !patterns.length) { $("#skipResult").innerHTML = `<p class="small">Enter header words or patterns first.</p>`; return; }
+  $("#skipPreview").disabled = true; $("#skipResult").innerHTML = `<p class="small">Checking every file of ${esc($("#setRepo").value)}…</p>`;
+  try {
+    const r = await api("/api/skip_preview", {repo: $("#setRepo").value, skip_header_words: words, skip_patterns: patterns});
+    $("#skipResult").innerHTML = `<table style="margin-top:10px"><tr><th>Rule</th><th>Files</th><th>Blocks</th><th>Lines not indexed</th></tr>` +
+      r.rules.map(x => `<tr><td>${esc(x.rule === "header" ? "header words" : x.rule + ": " + (patterns[+x.rule.split(" ")[1] - 1] || ""))}</td><td>${x.files}</td><td>${x.blocks}</td><td>${x.lines}</td></tr>`).join("") +
+      `</table><div class="small">${r.files_checked} files checked. Nothing is saved until you click Save.</div>` +
+      r.rules.filter(x => x.example).map(x => `<details><summary>Example for ${esc(x.rule)}: ${esc(x.example.file)}:${x.example.lines[0]}–${x.example.lines[1]}</summary>${pre(x.example.text + (x.example.more ? "\n…" : ""))}</details>`).join("");
+  } catch (e) { $("#skipResult").innerHTML = `<p class="bad">${esc(e.message)}</p>`; }
+  $("#skipPreview").disabled = false;
 };
 
 /* folder picker */

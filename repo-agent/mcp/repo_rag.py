@@ -158,12 +158,15 @@ class RepoRAG:
                  peers: list = None, top_k: int = 5, budget_tokens: int = 6000, index_dir: str = None,
                  exclude: list = None, max_file_bytes: int = 2_000_000, embed_batch_size: int = 64,
                  candidate_pool: int = 60, rrf_k: int = 60, role_weights: dict = None, impact_depth: int = 2,
-                 progress=None):
+                 progress=None, chunking: str = "graph", chunk_lines: int = 60, chunk_overlap: int = 15,
+                 skip_header_words: list = None, skip_patterns: list = None):
         self.repo_name = repo_name
         self.repo_root = Path(repo_root)
         self.top_k, self.budget = top_k, budget_tokens
         self.cfg = IndexConfig(repo_name, self.repo_root, roots, file_types, structure, extra_extensions, peers,
-                               max_file_bytes=max_file_bytes, exclude=exclude)
+                               max_file_bytes=max_file_bytes, exclude=exclude, chunking=chunking,
+                               chunk_lines=chunk_lines, chunk_overlap=chunk_overlap,
+                               skip_header_words=skip_header_words, skip_patterns=skip_patterns)
         self.batch = max(1, int(embed_batch_size))
         self.search_opts = {"candidate_pool": candidate_pool, "rrf_k": rrf_k, "role_weights": role_weights}
         self.impact_depth = impact_depth
@@ -215,11 +218,12 @@ class RepoRAG:
         return stats
 
     def update_config(self, roots: list, file_types: dict = None, structure: list = None,
-                      extra_extensions: list = None, exclude: list = None, max_file_bytes: int = 2_000_000) -> None:
-        """Index with changed settings from now on (e.g. components added in a later batch).
-        Applied at the next refresh, which rebuilds and reuses every cached vector."""
+                      extra_extensions: list = None, **index_kwargs) -> None:
+        """Index with changed settings from now on (e.g. components added in a later batch, a new
+        chunking mode or skip rule). index_kwargs: settings.index_kwargs(). Applied at the next
+        refresh, which rebuilds and reuses every cached vector."""
         self.cfg = IndexConfig(self.repo_name, self.repo_root, roots, file_types, structure, extra_extensions,
-                               self.cfg.peers, max_file_bytes=max_file_bytes, exclude=exclude)
+                               self.cfg.peers, **index_kwargs)
 
     def clear_index(self) -> None:
         """Start from scratch: remove the stored graph and every cached vector."""

@@ -19,6 +19,7 @@ import os
 import time
 from pathlib import Path, PurePosixPath
 
+from . import chunking
 from . import interfaces as ifc
 from .embedcost import work as embed_work
 from .extract import language_for, extract
@@ -27,6 +28,7 @@ from .model import (CLASS, CONTAINERS, DOC_SECTION, FIELD, FILE, FUNCTION, FUNCT
                     VARIABLE, Node)
 from .relations import build_edges
 from .security import is_secret_file, redact
+from .skiprules import SkipRules
 from .store import Store
 from .structure import resolve
 
@@ -62,7 +64,9 @@ _KNOWN_DATA_EXT = {".json", ".yaml", ".yml", ".toml", ".ini", ".cfg", ".conf", "
 class IndexConfig:
     def __init__(self, repo_name: str, repo_root: Path, roots: list[Path], file_types: dict | None = None,
                  structure: list | None = None, extra_extensions: list | None = None, peers: list | None = None,
-                 max_file_bytes: int = 2_000_000, exclude: list | None = None):
+                 max_file_bytes: int = 2_000_000, exclude: list | None = None, chunking: str = "graph",
+                 chunk_lines: int = 60, chunk_overlap: int = 15, skip_header_words: list | None = None,
+                 skip_patterns: list | None = None):
         self.repo_name, self.repo_root = repo_name, Path(repo_root).resolve()
         self.roots = [Path(r).resolve() for r in roots]
         self.file_types = {k.lower() if k.startswith(".") else k: v for k, v in (file_types or {}).items()}
@@ -72,13 +76,19 @@ class IndexConfig:
         self.peers = peers or []                         # [{"name":…, "path":…}]
         self.max_file_bytes = max_file_bytes
         self.exclude = [e.replace("\\", "/").strip("/") for e in (exclude or []) if e.strip()]
+        self.chunking = chunking if chunking in ("graph", "sliding", "hybrid") else "graph"   # chunking.MODES
+        self.chunk_lines = max(int(chunk_lines), 1)
+        self.chunk_overlap = min(max(int(chunk_overlap), 0), self.chunk_lines - 1)
+        self.skip = SkipRules(list(skip_header_words or []), list(skip_patterns or []))
 
     def fingerprint(self, model_sha: str) -> str:
         return hashlib.sha256(json.dumps({
             "format": INDEX_FORMAT, "code": _code_version(), "model": model_sha,
             "roots": [str(r) for r in self.roots],
             "file_types": self.file_types, "structure": self.structure, "exclude": self.exclude,
-            "max_file_bytes": self.max_file_bytes}, sort_keys=True).encode()).hexdigest()
+            "max_file_bytes": self.max_file_bytes, "chunking": self.chunking,
+            "chunks": [self.chunk_lines, self.chunk_overlap] if self.chunking != "graph" else None,
+            "skip": [self.skip.header_words, self.skip.patterns]}, sort_keys=True).encode()).hexdigest()
 
     def excluded(self, rel: str) -> bool:
         """rel matches an exclude glob, or lies inside a folder that does (build/** or build)."""
@@ -193,13 +203,20 @@ def build(cfg: IndexConfig, store: Store, embedder, model_sha: str, log=lambda *
     # ── parse ────────────────────────────────────────────────────────────────
     st = resolve(cfg.repo_root, sorted(sources), cfg.structure)
     trees: dict[str, Node] = {}
-    redactions = 0
+    texts: dict[str, str] = {}                          # what was parsed (skip rules and redaction applied)
+    redactions = skipped_files = skipped_blocks = 0
     for i, (rel, (text, lang)) in enumerate(sources.items()):
         progress("parse", i, len(sources))
         if st.index_mode.get(rel) == "skip":           # developer's manifest: not indexed at all
             continue
+        if cfg.skip:                                     # developer's skip rules: blanked, line numbers kept
+            text, hits = cfg.skip.apply(text)
+            if hits:
+                skipped_files += 1
+                skipped_blocks += len(hits)
         text, n = redact(text)
         redactions += n
+        texts[rel] = text
         lang = st.lang_override.get(rel, lang) if lang in ("c", "cpp") else lang
         try:
             trees[rel] = extract(rel, text, lang)
@@ -210,6 +227,8 @@ def build(cfg: IndexConfig, store: Store, embedder, model_sha: str, log=lambda *
         log("WARN", f"  Skipped {secret_files} secret-store file(s)")
     if redactions:
         log("WARN", f"  Redacted {redactions} secret-looking value(s) before indexing")
+    if skipped_blocks:
+        log("INDEX", f"  Skip rules: {skipped_blocks} block(s) in {skipped_files} file(s) not indexed")
 
     # ── structure onto nodes ─────────────────────────────────────────────────
     for rel, root in trees.items():
@@ -244,13 +263,20 @@ def build(cfg: IndexConfig, store: Store, embedder, model_sha: str, log=lambda *
         e.src = tmap.get(e.src, e.src)
         edges.append(e)
 
-    parse_seconds = time.perf_counter() - t_start      # reading, parsing, structure and links
+    # ── chunks (sliding window / hybrid), after the graph links are built ────
+    file_mode = {}                                     # external code indexed by signatures gets no windows
+    for rel, root in trees.items():
+        file_mode[rel] = "graph" if st.index_mode.get(rel) == "signatures" else cfg.chunking
+        edges += chunking.add_chunks(root, texts.get(rel, ""), file_mode[rel], cfg.chunk_lines, cfg.chunk_overlap)
+
+    parse_seconds = time.perf_counter() - t_start      # reading, parsing, structure, links and chunks
     # ── embeddings (only new/changed text) ───────────────────────────────────
     all_nodes = [n for r in trees.values() for n in r.walk()] + target_nodes
+    mode_of = lambda n: file_mode.get(n.file, cfg.chunking)
     to_embed = {}
     for n in all_nodes:
         n.attrs.pop("calls", None) if n.kind not in (FUNCTION, METHOD) else None
-        if n.kind in EMBED_KINDS and n.role not in NOT_SEARCHED_ROLES and n.kind != FILE:
+        if chunking.embeddable(n, mode_of(n)) and n.role not in NOT_SEARCHED_ROLES:
             to_embed[n.uid] = _embed_text(n)
     shas = {uid: hashlib.sha256(t.encode()).hexdigest() for uid, t in to_embed.items()}
     cached = store.cached_embeddings(set(shas.values()))
@@ -284,7 +310,7 @@ def build(cfg: IndexConfig, store: Store, embedder, model_sha: str, log=lambda *
                          n.parent.uid if n.parent is not None else "", n.role, n.visibility, n.target,
                          n.signature, n.doc, n.text, json.dumps(attrs, ensure_ascii=False), text_sha,
                          _tokens(n.text)))
-            if store.fts and n.kind != FILE:
+            if store.fts and chunking.keyword_indexed(n, mode_of(n)):
                 fts_rows.append((n.uid, n.name, n.qualname, n.signature, n.doc, n.text if n.kind not in CONTAINERS
                                  else n.signature))
         db.executemany(f"INSERT OR REPLACE INTO nodes VALUES ({','.join('?' * 18)})", rows)
@@ -316,7 +342,8 @@ def build(cfg: IndexConfig, store: Store, embedder, model_sha: str, log=lambda *
         log("WARN", f"  Unclassified file types not indexed: {', '.join(sorted(unknown))} "
                     "(classify them in mcp/config.yaml → file_types)")
     return {"rebuilt": True, "files": len(trees), "nodes": len(all_nodes), "edges": len(edges),
-            "embedded": len(new_vecs), "reused": len(cached),
+            "embedded": len(new_vecs), "reused": len(cached), "chunking": cfg.chunking,
+            "skipped": {"files": skipped_files, "blocks": skipped_blocks},
             # this computer's real speed, for later time estimates
             "speed": {"parse_seconds": parse_seconds, "parse_bytes": sum(len(t) for t, _ in sources.values()),
                       "embed_seconds": embed_seconds, "embed_work": sum(embed_work(len(t)) for t in missing.values())},

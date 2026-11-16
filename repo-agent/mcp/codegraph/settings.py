@@ -26,6 +26,11 @@ REPO_SETTINGS = {
     "exclude":            ([], "creation", "Paths never indexed (globs, e.g. build/** or *.generated.c)", "globs", None, None),
     "deferred":           ([], "creation", "Components left for a later batch (not indexed yet)", "globs", None, None),
     "extra_extensions":   ([], "creation", "Extra file extensions to index as plain text (e.g. .tmpl)", "exts", None, None),
+    "chunking":           ("graph", "creation", "Chunking method", "choice", ("graph", "sliding", "hybrid"), None),
+    "chunk_lines":        (60, "creation", "Chunk size in lines (sliding window, hybrid)", "int", 5, 2000),
+    "chunk_overlap":      (15, "creation", "Overlap between chunks in lines", "int", 0, 1000),
+    "skip_header_words":  ([], "creation", "Skip the top-of-file comment block if it contains any of these words", "words", None, None),
+    "skip_patterns":      ([], "creation", "Text never indexed (regular expressions, one per line)", "regexes", None, None),
     "max_file_kb":        (2000, "creation", "Files larger than this are skipped (KB)", "int", 10, 50000),
     "embed_batch_size":   (64, "creation", "Units embedded per batch (higher = faster, more memory)", "int", 1, 512),
     "refresh_seconds":    (60, "creation", "How often a server checks for changed files (seconds)", "int", 10, 3600),
@@ -59,6 +64,21 @@ HELP = {
     "extra_extensions": "File types that aren't recognised automatically but should still be searchable. Their "
                         "files are stored as whole plain-text units (no functions or classes). For code in another "
                         "language, answer the question in the Review step instead.",
+    "chunking": "How code is cut into searchable pieces. graph: whole functions, classes, IDL operations and "
+                "documentation sections, never cut (default). sliding: every file in chunks of 'Chunk size' lines "
+                "overlapping by 'Overlap' lines; results are chunks with their line range, linked to the code they "
+                "cover. hybrid: whole units as results, but long units are also searched in overlapping windows, so "
+                "a match anywhere in them is found. Calls, IDL links and tests are built in every mode.",
+    "chunk_lines": "Size of one chunk (sliding) or window (hybrid), in lines. Smaller chunks match more precisely "
+                   "but carry less context. Not used in graph mode.",
+    "chunk_overlap": "How many lines neighbouring chunks share, so code at a chunk boundary is still found whole in "
+                     "one of them. Must be smaller than the chunk size. Not used in graph mode.",
+    "skip_header_words": "Words such as Author, Created, Date, Copyright. If the comment block at the top of a file "
+                         "(/* */, //, #, --, %, ; or a Python docstring) contains any of them, the block is never "
+                         "indexed. Line numbers stay correct. Use Preview to see which files it affects.",
+    "skip_patterns": "Regular expressions, one per line (multi-line mode, ^ and $ match at each line). Every match "
+                     "is never indexed — e.g. version-control keyword lines or generated banners. Line numbers stay "
+                     "correct. Patterns that could take extremely long, like (a+)+, are refused. Use Preview first.",
     "max_file_kb": "Files larger than this are skipped — usually generated, minified or data files. Raising it "
                    "indexes them, but building takes longer and results get noisier.",
     "embed_batch_size": "How many units are turned into vectors at once while building. Higher is faster but "
@@ -152,6 +172,29 @@ def validate(values: dict, spec=REPO_SETTINGS) -> tuple[dict, list[str]]:
                     if not re.fullmatch(r"\.[a-z0-9_+-]{1,15}", e):
                         raise ValueError(f"{e!r} is not a file extension like .tmpl")
                 clean[key] = v
+            elif kind == "choice":
+                v = str(value).strip().lower()
+                if v not in lo:
+                    raise ValueError(f"must be one of {', '.join(lo)}")
+                clean[key] = v
+            elif kind == "words":
+                from .skiprules import MAX_WORDS, validate_word
+                v = [w.strip() for w in _as_list(value) if w.strip()]
+                if len(v) > MAX_WORDS:
+                    raise ValueError(f"at most {MAX_WORDS} words")
+                for w in v:
+                    if validate_word(w):
+                        raise ValueError(f"{w!r}: {validate_word(w)}")
+                clean[key] = v
+            elif kind == "regexes":
+                from .skiprules import MAX_PATTERNS, validate_pattern
+                v = [r for r in _as_list(value) if r.strip()]
+                if len(v) > MAX_PATTERNS:
+                    raise ValueError(f"at most {MAX_PATTERNS} patterns")
+                for r in v:
+                    if validate_pattern(r):
+                        raise ValueError(f"{r!r}: {validate_pattern(r)}")
+                clean[key] = v
             elif kind == "weights":
                 if not isinstance(value, dict):
                     raise ValueError("must map roles to numbers")
@@ -166,6 +209,12 @@ def validate(values: dict, spec=REPO_SETTINGS) -> tuple[dict, list[str]]:
                 clean[key] = v
         except (TypeError, ValueError) as e:
             errors.append(f"{label}: {e}")
+    if spec is REPO_SETTINGS and ("chunk_lines" in clean or "chunk_overlap" in clean):
+        size = clean.get("chunk_lines", values.get("chunk_lines", REPO_SETTINGS["chunk_lines"][0]))
+        overlap = clean.get("chunk_overlap", REPO_SETTINGS["chunk_overlap"][0])
+        if isinstance(size, int) and overlap >= size:
+            errors.append(f"{REPO_SETTINGS['chunk_overlap'][2]}: must be smaller than the chunk size ({size})")
+            clean.pop("chunk_overlap", None)
     return clean, errors
 
 
@@ -178,13 +227,22 @@ def load(cfg: dict | None, spec=REPO_SETTINGS) -> dict:
     return out
 
 
+def index_kwargs(repo_cfg: dict | None) -> dict:
+    """What a build indexes, and how — identical in every builder (and when a running server
+    re-reads its settings)."""
+    s = load(repo_cfg)
+    return {"exclude": s["exclude"] + s["deferred"], "max_file_bytes": s["max_file_kb"] * 1024,
+            "chunking": s["chunking"], "chunk_lines": s["chunk_lines"],
+            "chunk_overlap": min(s["chunk_overlap"], s["chunk_lines"] - 1),
+            "skip_header_words": s["skip_header_words"], "skip_patterns": s["skip_patterns"]}
+
+
 def rag_kwargs(repo_cfg: dict | None) -> dict:
     """Keyword arguments for RepoRAG(...) that depend on settings — identical in every builder."""
     s = load(repo_cfg)
-    return {"top_k": s["top_k"], "budget_tokens": s["result_budget_tokens"], "exclude": s["exclude"] + s["deferred"],
-            "max_file_bytes": s["max_file_kb"] * 1024, "embed_batch_size": s["embed_batch_size"],
+    return {"top_k": s["top_k"], "budget_tokens": s["result_budget_tokens"], "embed_batch_size": s["embed_batch_size"],
             "candidate_pool": s["candidate_pool"], "rrf_k": s["rrf_k"], "role_weights": s["role_weights"],
-            "impact_depth": s["impact_depth"]}
+            "impact_depth": s["impact_depth"], **index_kwargs(repo_cfg)}
 
 
 def roots(repo_root, repo_cfg: dict | None) -> list[Path]:

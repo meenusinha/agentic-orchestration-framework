@@ -666,6 +666,14 @@ class Handler(BaseHTTPRequestHandler):
                 return self._send(200, {"repos": scan(body["repos"])})
             if u.path == "/api/configure":
                 return self._send(200, {"job": start_job("Configure", job_configure(body))})
+            if u.path == "/api/skip_preview":           # read-only, in a separate process with a time limit
+                words, patterns = body.get("skip_header_words") or [], body.get("skip_patterns") or []
+                if not isinstance(words, list) or not isinstance(patterns, list):
+                    return self._send(400, {"error": "words and patterns must be lists"})
+                try:
+                    return self._send(200, graphrag_ops.preview_skip_rules(str(body.get("repo", "")), words, patterns))
+                except RuntimeError as e:
+                    return self._send(400, {"error": str(e)})
             if u.path == "/api/estimate":
                 return self._send(200, {"job": start_job("Estimate", job_estimate)})
             if u.path == "/api/verify":

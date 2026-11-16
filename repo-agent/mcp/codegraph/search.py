@@ -15,7 +15,7 @@ from pathlib import Path
 
 import numpy as np
 
-from .model import (CALLS, CALLS_OPERATION, CLASS, CONTAINS, DECLARES, DOCUMENTS, FILE, FUNCTION, FUNCTION_DECL,
+from .model import (CALLS, CALLS_OPERATION, CHUNK, CLASS, CONTAINS, COVERS, DECLARES, DOCUMENTS, FILE, FUNCTION, FUNCTION_DECL,
                     GENERATED_FROM, IDL_ATTRIBUTE, IDL_INTERFACE, IDL_OPERATION, IMPLEMENTS, METHOD, MODULE, NAMESPACE, TESTS)
 from .store import Store
 
@@ -90,8 +90,14 @@ class GraphSearch:
                 fused[self.uids[i]] = fused.get(self.uids[i], 0) + 1.0 / (self.rrf_k + rank)
         for rank, (uid, _) in enumerate(self.s.keyword(query, limit=self.pool)):
             fused[uid] = fused.get(uid, 0) + 1.0 / (self.rrf_k + rank)
-        ranked = []
+        merged: dict[str, float] = {}                 # hybrid chunking: a window's hit counts for its whole unit
         for uid, sc in fused.items():
+            _, kind, parent = self.meta.get(uid, ("", "", ""))
+            if kind == CHUNK and parent and self.meta.get(parent, ("", "", ""))[1] != FILE:
+                uid = parent
+            merged[uid] = max(merged.get(uid, 0.0), sc)
+        ranked = []
+        for uid, sc in merged.items():
             role, kind, _ = self.meta.get(uid, ("", "", ""))
             w = self.role_weight.get(role, 1.0)
             if w == 0 or kind == FILE:
@@ -128,6 +134,34 @@ class GraphSearch:
         if parent and parent["kind"] in _PARENT_KINDS:
             out["parent"] = {"qualname": parent["qualname"], "kind": parent["kind"], "skeleton": parent["text"],
                              "file": parent["file"]}
+        if n["kind"] == CHUNK:                         # sliding window: the relations of the code it covers
+            covered = [dst for _, dst, _, _, _ in self.s.edges_from(uid, (COVERS,))]
+            rel = {"covers": [self._ref(dst, "", 1.0) for dst in covered]}
+            for dst in covered:
+                for key, refs in self._relations(dst).items():
+                    known = {(r.get("qualname") or r.get("name"), r.get("file")) for r in rel.get(key, [])}
+                    rel.setdefault(key, []).extend(r for r in refs if (r.get("qualname") or r.get("name"), r.get("file"))
+                                                   not in known)
+            rel = {k: v for k, v in rel.items() if v}
+        else:
+            rel = self._relations(uid)
+        if rel:
+            out["relations"] = {k: v[:8] for k, v in rel.items()}
+        iface_ids = {r["name"].rsplit("::", 1)[0] if r.get("kind") == "op" else r["name"]
+                     for r in rel.get("implements", []) + rel.get("calls_operation", [])}
+        if n["kind"] in (IDL_INTERFACE, IDL_OPERATION, IDL_ATTRIBUTE):
+            iface_ids.add(n["qualname"] if n["kind"] == IDL_INTERFACE else n["qualname"].rsplit("::", 1)[0])
+        for r in rel.get("covers", []):                 # a chunk of an IDL file: the interfaces it defines
+            if r.get("kind") == IDL_INTERFACE:
+                iface_ids.add(r["name"])
+            elif r.get("kind") in (IDL_OPERATION, IDL_ATTRIBUTE):
+                iface_ids.add(r["name"].rsplit("::", 1)[0])
+        if iface_ids:
+            out["interfaces"] = [self.trace_interface(i, include_text=False, op=_op_of(n)) for i in sorted(iface_ids)]
+        return out
+
+    def _relations(self, uid: str) -> dict:
+        """Calls, IDL links, declarations, callers, tests and documentation of one unit."""
         rel = {}
         for src, dst, t, name, conf in self.s.edges_from(uid, (CALLS, CALLS_OPERATION, IMPLEMENTS, GENERATED_FROM,
                                                               DECLARES)):
@@ -139,15 +173,7 @@ class GraphSearch:
             if sn and not (key == "called_by" and sn["role"] == "test"):   # tests appear only as evidence
                 rel.setdefault(key, []).append({"qualname": sn["qualname"], "file": sn["file"],
                                                 "line": sn["start_line"], "confidence": conf})
-        if rel:
-            out["relations"] = {k: v[:8] for k, v in rel.items()}
-        iface_ids = {r["name"].rsplit("::", 1)[0] if r.get("kind") == "op" else r["name"]
-                     for r in rel.get("implements", []) + rel.get("calls_operation", [])}
-        if n["kind"] in (IDL_INTERFACE, IDL_OPERATION, IDL_ATTRIBUTE):
-            iface_ids.add(n["qualname"] if n["kind"] == IDL_INTERFACE else n["qualname"].rsplit("::", 1)[0])
-        if iface_ids:
-            out["interfaces"] = [self.trace_interface(i, include_text=False, op=_op_of(n)) for i in sorted(iface_ids)]
-        return out
+        return rel
 
     def _ref(self, dst: str, name: str, conf: float) -> dict:
         if dst.startswith("@"):

@@ -549,6 +549,52 @@ def _run(a):
         g.call("/api/settings", {"repos": {"sample-server": {"top_k": 5, "result_budget_tokens": 6000, "exclude": []}},
                                  "router": {"router_top_repos": 2}})
         g.job("/api/verify", {})
+
+        print("\n12b. Chunking and skip rules", flush=True)
+        policy = Path(res["repos"][0]) / "policy" / "pwd_policy.c"
+        original_policy = policy.read_text(encoding="utf-8")
+        policy.write_text("/*\n * Author: Jane Example\n * Created: 2019-03-04\n */\n" + original_policy, encoding="utf-8")
+        code, pv = g.call("/api/skip_preview", {"repo": "sample-server", "skip_header_words": ["Author", "Created"],
+                                                "skip_patterns": [r"^#define PWD_MIN_LEN.*$"]})
+        rules = {x["rule"]: x for x in pv.get("rules", [])}
+        check("skip preview: files matched per rule, with an example of what is removed",
+              code == 200 and rules.get("header", {}).get("files") == 1 and "Jane Example" in (rules["header"].get("example") or {}).get("text", "")
+              and rules.get("pattern 1", {}).get("files") == 1, str({k: v["files"] for k, v in rules.items()}))
+        code, bad = g.call("/api/settings", {"repos": {"sample-server": {"skip_patterns": ["(a+)+"]}}})
+        check("skip rules: a pattern that could take extremely long is refused", code == 400, str(bad.get("errors"))[:90])
+        code, bad = g.call("/api/settings", {"repos": {"sample-server": {"chunk_lines": 10, "chunk_overlap": 10}}})
+        check("chunking: an overlap as large as the chunk size is refused", code == 400)
+        code, saved = g.call("/api/settings", {"repos": {"sample-server": {"chunking": "sliding", "chunk_lines": 8, "chunk_overlap": 2,
+                                                                            "skip_header_words": ["Author", "Created"]}}})
+        check("chunking and skip rules saved; a rebuild is asked for", code == 200 and saved.get("rebuild_needed") == ["sample-server"])
+        ok, lines, _ = g.job("/api/verify", {})
+        code, rq = g.call("/api/query", {"mode": "search", "text": "password policy minimum length points", "repo": "sample-server"})
+        hits = [h["node"] for x in rq.get("result", {}).get("repos", []) for h in x["hits"]]
+        check("sliding window: results are chunks with file and line range, at most the chunk size",
+              ok and hits and all(h["kind"] == "chunk" and h["lines"][1] - h["lines"][0] < 8 for h in hits),
+              ", ".join(f"{h['file']}:{h['lines'][0]}-{h['lines'][1]}" for h in hits[:4]))
+        rels = [h for x in rq.get("result", {}).get("repos", []) for h in x["hits"] if (h.get("relations") or {}).get("covers")]
+        check("sliding window: a chunk lists the code it covers, with file names", rels and all(
+              c.get("file") for h in rels for c in h["relations"]["covers"]))
+        code, t2 = g.call("/api/query", {"mode": "trace", "text": "IPasswordService"})
+        check("sliding window: trace interface still works", code == 200 and t2["result"]["trace"].get("found"))
+        code, fq = g.call("/api/query", {"mode": "search", "text": "Jane Example author created", "repo": "sample-server"})
+        check("skip rules: the author header is never indexed", "Jane Example" not in json.dumps(fq))
+        code, im = g.call("/api/query", {"mode": "impact", "text": "pwd_policy_check"})
+        node = next((l["node"] for x in im.get("result", {}).get("impact", []) for l in x.get("local", [])
+                     if l["node"]["file"] == "policy/pwd_policy.c"), {})
+        lineno = next(i for i, l in enumerate(policy.read_text(encoding="utf-8").splitlines(), 1) if "pwd_policy_check(" in l)
+        check("skip rules: line numbers still match the file", node.get("lines", [0])[0] == lineno,
+              f"graph {node.get('lines')}, file line {lineno}")
+        code, _ = g.call("/api/settings", {"repos": {"sample-server": {"chunking": "hybrid"}}})
+        ok, lines, _ = g.job("/api/verify", {})
+        code, rq = g.call("/api/query", {"mode": "search", "text": "password policy minimum length points", "repo": "sample-server"})
+        kinds = {h["node"]["kind"] for x in rq.get("result", {}).get("repos", []) for h in x["hits"]}
+        check("hybrid: results are whole units again", ok and kinds and "chunk" not in kinds, ", ".join(sorted(kinds)))
+        g.call("/api/settings", {"repos": {"sample-server": {"chunking": "graph", "chunk_lines": 60, "chunk_overlap": 15,
+                                                             "skip_header_words": [], "skip_patterns": []}}})
+        policy.write_text(original_policy, encoding="utf-8")
+        g.job("/api/verify", {})
         check("typed paths: an existing folder is found, a missing one is reported",
               g.call("/api/fs?path=" + q(str(pg_dir)))[1].get("found") is True and
               g.call("/api/fs?path=" + q(str(pg_dir / "no-such-folder")))[1].get("found") is False)
@@ -665,6 +711,11 @@ def _run(a):
         check("cli folders --include indexes it again", code == 0 and read_yaml(srv_path / "mcp" / "config.yaml").get("exclude") == [])
         code, out = cli("folders", "sample-server", "--exclude", "../outside")
         check("cli refuses a path outside the repository", code != 0 and "inside the repository" in out)
+        code, out = cli("skip", "sample-server", "--header-word", "Copyright", "--preview-only")
+        check("cli skip --preview-only shows the preview and saves nothing", code == 0 and "files checked" in out
+              and "nothing saved" in out and not read_yaml(srv_path / "mcp" / "config.yaml").get("skip_header_words"))
+        code, out = cli("chunking", "sample-client", "--overlap", "99")
+        check("cli chunking refuses an overlap larger than the saved chunk size", code != 0 and "smaller than the chunk size" in out)
         code, out = cli("estimate")
         check("cli estimate shows the components and the time", code == 0 and "Creating the whole GraphRAG takes" in out
               and re.search(r"(?m)^\s+yes\s+src\b", out))

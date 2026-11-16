@@ -128,9 +128,8 @@ def _reload_index_settings():
         log(REPO_NAME, "WARN", f"config.yaml not reloaded ({type(e).__name__}); keeping the current settings")
         return
     _cfg_mtime = mtime
-    kw = _settings.rag_kwargs(cfg)
     rag.update_config(_settings.roots(REPO_ROOT, cfg), cfg.get("file_types") or {}, cfg.get("structure") or [],
-                      cfg.get("extra_extensions") or [], exclude=kw["exclude"], max_file_bytes=kw["max_file_bytes"])
+                      cfg.get("extra_extensions") or [], **_settings.index_kwargs(cfg))
     log(REPO_NAME, "INFO", "Indexing settings changed in config.yaml — applied at this refresh")
 
 

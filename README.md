@@ -210,6 +210,8 @@ virtual-environment Python:
 GR=.github/skills/graphrag-setup/scripts/graphrag.py
 .venv/bin/python $GR status                                  # repositories, GraphRAG, exclusions, batches
 .venv/bin/python $GR folders server --exclude third_party    # or --include, --exclude-all, --include-all
+.venv/bin/python $GR chunking server --mode hybrid --lines 60 --overlap 15
+.venv/bin/python $GR skip server --header-word Author --header-word Created --preview-only   # then without --preview-only
 .venv/bin/python $GR estimate                                # time per component; suggests a first batch
 .venv/bin/python $GR build --suggested                       # or --all, --only R:C, --add R:C, --later R:C, --fresh REPO
 ```
@@ -281,6 +283,11 @@ fills in the defaults.
 | | Extra documentation folders (`knowledge_path`) | `./knowledge` | paths |
 | | Exclude (`exclude`) | none | globs, e.g. `build/**`, `*.generated.c`; also set in step 4 (untick a folder) |
 | | Components left for a later batch (`deferred`) | none (everything) | folders; filled in by step 6 |
+| | Chunking method (`chunking`) | `graph` | `graph` · `sliding` · `hybrid` (see [Chunking and skip rules](#chunking-and-skip-rules)) |
+| | Chunk size (`chunk_lines`) | 60 lines | 5–2000; sliding window and hybrid |
+| | Chunk overlap (`chunk_overlap`) | 15 lines | 0 to chunk size − 1 |
+| | Skip header words (`skip_header_words`) | none | e.g. `Author, Created, Date, Copyright` |
+| | Skip patterns (`skip_patterns`) | none | regular expressions, one per line |
 | | Extra file extensions indexed as text (`extra_extensions`) | none | e.g. `.tmpl` |
 | | Maximum file size (`max_file_kb`) | 2000 KB | 10–50000 |
 | | Embedding batch size (`embed_batch_size`) | 64 | 1–512 |
@@ -301,6 +308,37 @@ fills in the defaults.
 - The values are stored in each repository's `mcp/config.yaml` and in the framework's
   `orchestrator/mcp/config.yaml`; you can also edit them there. Saving from the page keeps
   the files' comments.
+
+### Chunking and skip rules
+
+**Chunking** decides how code is cut into the pieces that are searched:
+
+| Mode | Search results | Use it when |
+|---|---|---|
+| `graph` (default) | Whole functions, classes, IDL operations and documentation sections, never cut, with their class or module context | Almost always: answers contain complete units |
+| `sliding` | Chunks of *chunk size* lines that overlap by *overlap* lines, with file and line range; each chunk lists the code it covers and their calls, IDL links and tests | The code has few clear units (long scripts, generated or legacy code), or you prefer fixed-size pieces |
+| `hybrid` | Whole units, as in `graph`; units longer than the chunk size are also searched in overlapping windows, so a match deep inside a long function is found | The code has very long functions |
+
+The graph itself (calls, includes, IDL links, test evidence, processes) is built the same way in
+every mode, so trace interface and impact of change work in all three.
+
+**Skip rules** keep content out of the GraphRAG entirely — for example file headers with author
+names and creation dates:
+
+- **Header words:** if the comment block at the top of a file (`/* … */`, `//`, `#`, `--`, `%`,
+  `;`, or a Python docstring) contains any of these words, the block is skipped. A shebang or
+  encoding line before it is kept.
+- **Patterns:** regular expressions, one per line (multi-line mode: `^` and `$` match at every
+  line); every match is skipped anywhere in a file.
+- Skipped text is replaced by blank lines, so line numbers in results stay correct, and it never
+  reaches parsing, embedding or storage.
+- **Preview skip rules** (Settings page) shows, before saving, how many files each rule matches
+  and an example of what it removes. Patterns that could take extremely long, such as `(a+)+`,
+  are refused.
+
+Both are per repository, take effect when the GraphRAG is rebuilt (unchanged text keeps its
+vectors), and can also be set from Copilot Chat with `/graphrag-setup` or from the command line
+(`graphrag.py chunking …`, `graphrag.py skip …`).
 
 ### Typing paths
 
@@ -427,6 +465,7 @@ are protected the same way: every package in `requirements.lock` is pinned by it
 For details:
 
 - [docs/architecture.md](docs/architecture.md) — components, processes, storage, cost
+- [docs/requirements.md](docs/requirements.md) — every requirement with its status, open items and design decisions
 - [docs/security-considerations.md](docs/security-considerations.md) —
   data flow, every control, residual risks and recommendations
 - [docs/security-evidence.md](docs/security-evidence.md) — evidence for

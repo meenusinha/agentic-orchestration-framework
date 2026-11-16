@@ -50,6 +50,12 @@ First release for VS Code with GitHub Copilot, on Windows and Linux, under the A
   **Select all** / **Exclude all**, plus sub-folders or file patterns typed or chosen with
   **Browse…**; saved as the `exclude` setting. Step 6 has **Select all** / **Select none**
   per repository and for all. `configure.py` gains `--exclude`.
+- **Configurable chunking** per repository: knowledge graph (whole units, default), sliding window
+  (chunks of N lines with overlap, linked to the code they cover) or hybrid (whole units, long ones
+  also searched in windows); chunk size and overlap configurable. Graph links are built in every mode.
+- **Skip rules**: content never indexed — the top-of-file comment block containing given words
+  (e.g. Author, Created) and regular expressions; blanked so line numbers stay correct; preview
+  before saving; slow patterns refused. Settings page, `graphrag.py chunking` / `skip`.
 - **Map file types in bulk** (step 4): tick any of the file types found in all repositories,
   choose the kind and language once, and every row for them is filled in. Rows show whether
   they need an answer (red), hold the scan's suggestion (amber) or are accepted (green).

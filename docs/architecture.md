@@ -34,6 +34,8 @@ Supported platforms: **Windows and Linux**.
 | `search.py` | Hybrid ranking (vectors + keywords), interface tracing, impact analysis, whole-unit result assembly |
 | `security.py` | Secret-file exclusion and redaction |
 | `settings.py` | Every creation, query and router setting with its default and range; used by every program that builds or searches a graph, so they always build identical graphs |
+| `chunking.py` | Chunking modes: whole units (`graph`), overlapping line windows linked to the units they cover (`sliding`), whole units plus windows for long units (`hybrid`); decides what is embedded and keyword-indexed |
+| `skiprules.py` | Skip rules: the top-of-file comment block containing given words, and regular expressions; matched text is blanked (line numbers kept) before redaction and parsing; patterns are validated |
 | `embedcost.py` | Cost of embedding a text relative to its length (measured: grows with the square of the length, constant beyond the model's 8192-token limit); used by the progress bar and the time estimate |
 | `components.py` | Divides a repository into components (top-level folders; a folder holding most of a large repository is split into its sub-folders) for the time estimate and for building in batches |
 
@@ -48,6 +50,7 @@ Each prints JSON lines (progress, then one result) that the page streams.
 | `gui/buildspeed.py` | Records each larger build's real speed (seconds per byte parsed, seconds per unit of embedding work) in `~/.agentic-orchestration/build-speed.json`, numbers only, for later estimates |
 | `gui/verify.py` | Builds (pass 1) and links (pass 2) every graph; reports progress-bar events (repository, stage, done/total, overall fraction weighted by the estimate's expected work per repository and stage, time left in the stage); `--fresh NAME` starts a repository from scratch |
 | `gui/query_worker.py` | Loads the model and all graphs once and answers the query field |
+| `gui/skip_preview.py` | Read-only: which files each skip rule matches and an example of what it removes; run with a time limit |
 | `gui/graphrag_ops.py` | Shared by the setup page and `graphrag.py`: connected repositories, validated changes to a repository's settings (excluded folders, components left for later), the estimate arithmetic and batch suggestion, running the workers |
 
 ---

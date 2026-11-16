@@ -134,12 +134,13 @@ class GraphView:
             return [self._item(repo, r) for r in rows]
         if not _UID.match(node):
             raise ValueError("bad node id")
-        rows = self._rows(repo, f"SELECT {','.join(_LIST_COLS)} FROM nodes WHERE parent=? "
+        rows = self._rows(repo, f"SELECT {','.join(_LIST_COLS)} FROM nodes WHERE parent=? AND kind != 'chunk' "
                                 "ORDER BY start_line, name", (node,))
         return [self._item(repo, r) for r in rows]
 
     def _item(self, repo, r) -> dict:
-        n = self.db(repo).execute("SELECT count(*) FROM nodes WHERE parent=?", (r["uid"],)).fetchone()[0]
+        n = self.db(repo).execute("SELECT count(*) FROM nodes WHERE parent=? AND kind != 'chunk'",   # windows are
+                                  (r["uid"],)).fetchone()[0]                                         # not structure
         lines = f"{r['start_line']}–{r['end_line']}" if r.get("start_line") else ""
         return {"id": r["uid"], "kind": r["kind"], "name": r["name"] or r["qualname"] or r["file"],
                 "qualname": r["qualname"], "role": r["role"], "target": r["target"], "file": r["file"],
@@ -162,7 +163,8 @@ class GraphView:
             else:
                 fuid = uid or (con.execute("SELECT uid FROM nodes WHERE kind='file' AND file=?",
                                            (path,)).fetchone() or [None])[0]
-                n = con.execute("SELECT count(*) FROM nodes WHERE parent=?", (fuid,)).fetchone()[0] if fuid else 0
+                n = con.execute("SELECT count(*) FROM nodes WHERE parent=? AND kind != 'chunk'",
+                                (fuid,)).fetchone()[0] if fuid else 0
                 files.append({"id": fuid or f"file:{path}", "kind": "file", "name": rest, "file": path,
                               "role": role, "lang": lang, "count": n, "has_children": n > 0})
         out = []
@@ -252,7 +254,7 @@ class GraphView:
         out = []
         for repo in self.repos:
             try:
-                rows = self._rows(repo, f"SELECT {','.join(_LIST_COLS)} FROM nodes WHERE kind NOT IN ('file') AND "
+                rows = self._rows(repo, f"SELECT {','.join(_LIST_COLS)} FROM nodes WHERE kind NOT IN ('file', 'chunk') AND "
                                         "(name = ? OR qualname = ? OR name LIKE ? OR qualname LIKE ?) "
                                         "ORDER BY (name = ?) DESC, length(qualname) LIMIT ?",
                                   (q, q, f"%{q}%", f"%{q}%", q, limit))

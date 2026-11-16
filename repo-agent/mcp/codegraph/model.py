@@ -30,6 +30,7 @@ DOC = "doc"
 DOC_SECTION = "doc_section"
 TEXT = "text"                # whole file indexed as one unit (unknown/plain types)
 TARGET = "target"            # build target: executable / library (a process when executable)
+CHUNK = "chunk"              # window of lines (sliding-window or hybrid chunking)
 
 CONTAINERS = {FILE, MODULE, NAMESPACE, CLASS, IDL_INTERFACE, DOC, TARGET}
 
@@ -49,6 +50,7 @@ IMPLEMENTS = "IMPLEMENTS"        # server code → IDL interface / operation
 CALLS_OPERATION = "CALLS_OPERATION"  # client code → IDL operation
 PROVIDES = "PROVIDES"            # target/process → IDL interface (server side)
 CONSUMES = "CONSUMES"            # target/process → IDL interface (client side)
+COVERS = "COVERS"                # sliding-window chunk → unit it overlaps
 
 # ── Roles (from manifest > build facts > heuristics) ──────────────────────────
 ROLES = ("interface", "implementation", "internal", "external", "library", "test",

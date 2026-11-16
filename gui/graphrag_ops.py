@@ -87,6 +87,29 @@ def plan_setting(changes: dict, key: str) -> list:
     return out
 
 
+def plan_values(repo: str, values: dict) -> list:
+    """Validate several settings of one repository ({key: value}). → changes for write_settings;
+    raises ValueError with every problem."""
+    import yaml
+    repos = {r["name"]: r for r in configured_repos()}
+    if repo not in repos:
+        raise ValueError(f"unknown repository {repo!r}")
+    p = repo_cfg_path(repos[repo])
+    text = p.read_text(encoding="utf-8") if p.exists() else ""
+    now = settings.load(yaml.safe_load(text) or {})
+    if "chunk_lines" in values or "chunk_overlap" in values:     # checked together with the saved one
+        values = {"chunk_lines": now["chunk_lines"], "chunk_overlap": now["chunk_overlap"], **values}
+    clean, errors = settings.validate(values)
+    if errors:
+        raise ValueError("; ".join(errors))
+    out = []
+    for key, value in clean.items():
+        if now[key] != value:
+            set_yaml_key(text, key, value)              # refuses values it can't write safely
+            out.append((repo, p, key, value))
+    return out
+
+
 def plan_deferred(deferred: dict) -> list:
     """Components left for a later batch, per repository ({repo: [component folders]})."""
     if not isinstance(deferred or {}, dict):
@@ -103,6 +126,13 @@ def write_settings(changes: list) -> None:
     for _, p, key, value in changes:
         text = p.read_text(encoding="utf-8") if p.exists() else ""
         p.write_text(set_yaml_key(text, key, value), encoding="utf-8")
+
+
+def preview_skip_rules(repo: str, words: list, patterns: list, on_message=lambda m: None, timeout: float = 60) -> dict:
+    """Which files each skip rule matches, with an example (read-only, in a separate process with
+    a time limit, so a slow pattern can't hang the caller)."""
+    return run_worker("skip_preview.py", ["--repo", repo, "--words", json.dumps(words), "--patterns",
+                                          json.dumps(patterns)], on_message=on_message, timeout=timeout)
 
 
 def clean_plan(plan) -> dict:
@@ -187,13 +217,19 @@ def fmt_bytes(n: float) -> str:
 
 
 # ── workers ──────────────────────────────────────────────────────────────────
-def run_worker(script: str, args=(), on_message=lambda msg: None, on_bar=lambda bar: None) -> dict:
+def run_worker(script: str, args=(), on_message=lambda msg: None, on_bar=lambda bar: None,
+               timeout: float | None = None) -> dict:
     """Run a gui/ worker that prints JSON lines: progress messages → on_message(text),
     progress-bar events → on_bar(event); returns its result. If the worker dies without a
-    result (e.g. out of memory), the end of its error output is reported."""
+    result (e.g. out of memory), the end of its error output is reported. With a timeout, the
+    worker is stopped when it takes longer."""
+    import threading
     errf = tempfile.TemporaryFile(mode="w+", encoding="utf-8", errors="replace")
     p = subprocess.Popen([sys.executable, str(GUI / script), *args], stdout=subprocess.PIPE,
                          stderr=errf, text=True, bufsize=1, encoding="utf-8", errors="replace")
+    timer = threading.Timer(timeout, p.kill) if timeout else None
+    if timer:
+        timer.start()
     result = None
     for line in p.stdout:
         try:
@@ -207,6 +243,12 @@ def run_worker(script: str, args=(), on_message=lambda msg: None, on_bar=lambda 
         elif msg.get("event") == "result":
             result = msg
     p.wait()
+    timed_out = bool(timer) and not timer.is_alive() and result is None
+    if timer:
+        timer.cancel()
+    if timed_out:
+        errf.close()
+        raise RuntimeError(f"stopped after {timeout:.0f} s — a pattern may be too slow; simplify it")
     try:
         if not result:
             errf.seek(0)
