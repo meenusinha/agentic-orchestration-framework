@@ -52,6 +52,12 @@ button.link:hover:not(:disabled){background:none;text-decoration:underline}
 select,input[type=text]{font:inherit;font-size:14px;padding:8px 11px;border-radius:9px;border:1px solid var(--line);background:#fff;color:var(--ink);max-width:100%;transition:border-color .15s,box-shadow .15s}
 select:focus,input[type=text]:focus{outline:none;border-color:#93c5fd;box-shadow:var(--ring)}input::placeholder{color:#94a3b8}
 select.need{border-color:var(--bad);box-shadow:0 0 0 3px rgba(220,38,38,.12)}
+tr.need td:first-child{box-shadow:inset 3px 0 0 var(--bad)}tr.accepted td:first-child{box-shadow:inset 3px 0 0 var(--ok)}
+tr.suggested td:first-child{box-shadow:inset 3px 0 0 #f59e0b}.st.guess{background:var(--warn-soft);color:var(--warn)}.st.need{background:var(--bad-soft);color:var(--bad)}
+.bulk{border:1px solid var(--line);border-radius:var(--radius);padding:14px 16px;margin:0 0 14px;background:var(--soft)}
+.bulk .types{display:flex;flex-wrap:wrap;gap:6px;margin:8px 0}.bulk .types label{display:inline-flex;gap:6px;align-items:center;
+padding:4px 10px;border:1px solid var(--line);border-radius:999px;background:#fff;font-size:12.5px;cursor:pointer}
+.bulk .types label.todo{border-color:#fca5a5}.bulk .types label.guess{border-color:#fcd34d}.bulk .types label.done{border-color:#86efac}
 .row{display:flex;gap:10px;align-items:center;flex-wrap:wrap}.spacer{flex:1}
 .status{display:inline-flex;gap:9px;align-items:center;padding:9px 14px;border-radius:10px;background:var(--chip);margin-bottom:16px;font-size:14px;color:var(--ink2)}
 .status:has(b.ok){background:var(--ok-soft)}.status:has(b.warn){background:var(--warn-soft)}
@@ -450,11 +456,11 @@ async function showReview() {
       answers[sc.name] = {roles:{}, types:{}, off: new Set(off), other}; saved[sc.name] = {roles:{}, types:{}, off: new Set(off), other};
       (sc.folders||[]).forEach(f => { answers[sc.name].roles[f.folder] = f.role; saved[sc.name].roles[f.folder] = f.role; });
       (sc.unknown_types||[]).forEach(u => answers[sc.name].types[u.ext] = {kind:u.kind||"", parse_as:u.parse_as||""});
-      (sc.saved_types||[]).forEach(u => { answers[sc.name].types[u.ext] = {kind:u.kind||"", parse_as:u.parse_as||"", saved:true};
+      (sc.saved_types||[]).forEach(u => { answers[sc.name].types[u.ext] = {kind:u.kind||"", parse_as:u.parse_as||"", saved:true, confirmed:true};
         saved[sc.name].types[u.ext] = {kind:u.kind||"", parse_as:u.parse_as||""}; }); });
   }
   const sel = (opts, v, cls, attrs) => `<select class="${cls}" ${attrs}>${opts.map(o => `<option ${o===v?"selected":""}>${o}</option>`).join("")}</select>`;
-  $("#reviewBody").innerHTML = scans.map(sc => {
+  $("#reviewBody").innerHTML = bulkHtml() + scans.map(sc => {
     if (!sc.ok) return `<div class="card"><h3>${esc(sc.name)}</h3><p class="bad">${esc(sc.error)}</p></div>`;
     const a = answers[sc.name];
     const procs = (sc.targets||[]).map(t => `<span class="chip">${esc(t.kind)}: ${esc(t.name)}</span>`).join("") || `<span class="small">no Makefile / CMake targets found</span>`;
@@ -464,7 +470,8 @@ async function showReview() {
       <td>${f.folder ? sel(ROLES, a.roles[f.folder], "role", `data-r="${esc(sc.name)}" data-f="${esc(f.folder)}" ${a.off.has(f.folder) ? "disabled" : ""}`) : esc(f.role)}</td></tr>`).join("");
     const types = [...(sc.unknown_types||[]).filter(u => !typeExcluded(sc.name, u)), ...(sc.saved_types||[]).map(u => ({...u, saved:true}))];
     const unk = types.map(u => { const t = a.types[u.ext];
-      return `<tr><td><code>${esc(u.ext)}</code>${u.saved ? ` <span class="st indexed">answered before</span>` : `<div class="small">${u.count} file(s), e.g. ${esc(u.sample)}</div><div class="small">looks like ${esc(u.looks_like)}</div>`}</td>
+      const st = typeState(t);
+      return `<tr class="${st}"><td><code>${esc(u.ext)}</code> ${u.saved ? "" : st === "accepted" ? `<span class="st indexed">accepted</span>` : st === "suggested" ? `<span class="st guess" title="Filled in from what the file looks like — confirm or change it">suggested</span>` : `<span class="st need">needs an answer</span>`}${u.saved ? ` <span class="st indexed">answered before</span>` : `<div class="small">${u.count} file(s), e.g. ${esc(u.sample)}</div><div class="small">looks like ${esc(u.looks_like)}</div>`}</td>
       <td>${sel(["", ...KINDS], t.kind, "kind" + (t.kind ? "" : " need"), `data-r="${esc(sc.name)}" data-e="${esc(u.ext)}"`)}</td>
       <td>${t.kind === "ignore" ? "<span class='small'>not indexed</span>" : sel(["", ...LANGS], t.parse_as, "lang" + (t.parse_as ? "" : " need"), `data-r="${esc(sc.name)}" data-e="${esc(u.ext)}"`)}</td></tr>`; }).join("");
     return `<div class="card"><h3>${esc(sc.name)} <span class="small">${esc(sc.path)}</span></h3>
@@ -499,8 +506,11 @@ async function showReview() {
       a.other = [...a.other.split(",").map(x => x.trim()).filter(Boolean), globEsc(rel)].filter((x, i, l) => l.indexOf(x) === i).join(", ");
       showReview(); }, sc.path);
   });
-  document.querySelectorAll("select.kind").forEach(s => s.onchange = () => { answers[s.dataset.r].types[s.dataset.e].kind = s.value; showReview(); });
-  document.querySelectorAll("select.lang").forEach(s => s.onchange = () => { answers[s.dataset.r].types[s.dataset.e].parse_as = s.value; showReview(); });
+  bindBulk();
+  document.querySelectorAll("select.kind").forEach(s => s.onchange = () => { const t = answers[s.dataset.r].types[s.dataset.e];
+    t.kind = s.value; t.confirmed = true; showReview(); });
+  document.querySelectorAll("select.lang").forEach(s => s.onchange = () => { const t = answers[s.dataset.r].types[s.dataset.e];
+    t.parse_as = s.value; t.confirmed = true; showReview(); });
   $("#reviewNext").disabled = false;
 }
 $("#reviewNext").onclick = () => {
@@ -514,6 +524,55 @@ $("#reviewNext").onclick = () => {
   ow = {}; finish("review","configure");
 };
 
+/* file types in bulk: pick any of the found types, map them all to one kind and language */
+const answered = t => !!(t && t.kind && (t.kind === "ignore" || t.parse_as));
+const typeState = t => !answered(t) ? "need" : t.confirmed ? "accepted" : "suggested";   // red / amber / green
+let bulkSel = new Set(), bulkKind = "", bulkLang = "";
+function foundTypes() {             // ext → [{repo, answer}] for every type asked in step 4
+  const out = {};
+  scans.filter(sc => sc.ok).forEach(sc => {
+    [...(sc.unknown_types||[]).filter(u => !typeExcluded(sc.name, u)), ...(sc.saved_types||[])].forEach(u => {
+      (out[u.ext] = out[u.ext] || []).push({repo: sc.name, t: answers[sc.name].types[u.ext]}); }); });
+  return out;
+}
+function bulkHtml() {
+  const found = foundTypes(), exts = Object.keys(found).sort();
+  if (!exts.length) return "";
+  bulkSel = new Set([...bulkSel].filter(e => exts.includes(e)));
+  const todo = exts.filter(e => found[e].some(x => typeState(x.t) === "need"));
+  const sugg = exts.filter(e => !todo.includes(e) && found[e].some(x => typeState(x.t) === "suggested"));
+  const opt = (opts, v) => opts.map(o => `<option value="${esc(o)}" ${o === v ? "selected" : ""}>${esc(o || "choose…")}</option>`).join("");
+  return `<div class="bulk"><div class="row"><b>File types — map several at once</b><span class="spacer"></span>
+      <span class="small">${todo.length ? `<span class="bad">${todo.length} need an answer</span>` : ""}${todo.length && sugg.length ? " · " : ""}${sugg.length ? `<span class="warn">${sugg.length} suggested — confirm or change</span>` : ""}${!todo.length && !sugg.length ? `<span class="ok">all accepted</span>` : ""}</span></div>
+    <div class="small">Tick file types, choose what they contain and how to read them, then <b>Apply</b>. Every row for those types, in every repository, is filled in; you can still change single rows below.</div>
+    <div class="types">${exts.map(e => { const done = found[e].every(x => typeState(x.t) === "accepted");
+      return `<label class="${done ? "done" : todo.includes(e) ? "todo" : "guess"}" title="${esc(found[e].map(x => x.repo).join(", "))}"><input type="checkbox" data-bulk="${esc(e)}" ${bulkSel.has(e) ? "checked" : ""}>
+        <code>${esc(e)}</code> <span class="small">${found[e].length > 1 ? found[e].length + " repos" : esc(found[e][0].repo)}${done ? " ✓" : ""}</span></label>`; }).join("")}</div>
+    <div class="row"><span class="small"><button class="link" id="bulkTodo">Select unanswered</button> · <button class="link" id="bulkSugg">Select suggested</button> · <button class="link" id="bulkAll">Select all</button> · <button class="link" id="bulkNone">Clear</button></span>
+      <span class="spacer"></span>
+      <label class="small">Kind <select id="bulkKind">${opt(["", ...KINDS], bulkKind)}</select></label>
+      <label class="small">Read as <select id="bulkLang" ${bulkKind === "ignore" ? "disabled" : ""}>${opt(["", ...LANGS], bulkKind === "ignore" ? "" : bulkLang)}</select></label>
+      <button class="primary" id="bulkApply" ${bulkSel.size ? "" : "disabled"}>Apply to ${bulkSel.size || "selected"} type${bulkSel.size === 1 ? "" : "s"}</button></div>
+    <div class="small err" id="bulkErr"></div></div>`;
+}
+function bindBulk() {
+  if (!$("#bulkApply")) return;
+  const found = foundTypes();
+  document.querySelectorAll("[data-bulk]").forEach(c => c.onchange = () => { c.checked ? bulkSel.add(c.dataset.bulk) : bulkSel.delete(c.dataset.bulk); showReview(); });
+  $("#bulkTodo").onclick = () => { bulkSel = new Set(Object.keys(found).filter(e => found[e].some(x => typeState(x.t) === "need"))); showReview(); };
+  $("#bulkSugg").onclick = () => { bulkSel = new Set(Object.keys(found).filter(e => found[e].some(x => typeState(x.t) === "suggested"))); showReview(); };
+  $("#bulkAll").onclick = () => { bulkSel = new Set(Object.keys(found)); showReview(); };
+  $("#bulkNone").onclick = () => { bulkSel = new Set(); showReview(); };
+  $("#bulkKind").onchange = () => { bulkKind = $("#bulkKind").value; showReview(); };
+  $("#bulkLang").onchange = () => { bulkLang = $("#bulkLang").value; };
+  $("#bulkApply").onclick = () => {
+    if (!bulkKind) { $("#bulkErr").textContent = "Choose what these files contain (Kind)."; return; }
+    if (bulkKind !== "ignore" && !bulkLang) { $("#bulkErr").textContent = "Choose how to read them (Read as)."; return; }
+    bulkSel.forEach(e => found[e].forEach(x => { const t = answers[x.repo].types[e];
+      t.kind = bulkKind; t.parse_as = bulkKind === "ignore" ? "" : bulkLang; t.confirmed = true; }));
+    bulkSel = new Set(); showReview();
+  };
+}
 function typeExcluded(name, u) {      // an unknown file type found only in excluded folders
   const a = answers[name]; return !!(u.folders && u.folders.length && u.folders.every(f => f && a.off.has(f)));
 }

@@ -1,6 +1,6 @@
 ---
 name: cross-repo-feature-analysis
-description: Analyse a feature request or change across multiple related repositories — including processes that talk to each other through IDL interfaces (server/client IPC) — using the Agentic Orchestration MCP servers (an `orchestrator_router` server, and one code-graph server per repo with `search_code`, `trace_interface`, `impact_of`, `query_repo`). Use when the developer asks how to build or change a feature that may touch other repos or processes, asks which repos/processes/interfaces are affected, wants the impact of changing a function or IDL operation, or wants a cross-repo design or Feature Analysis Document. Also use to set up cross-repo analysis, connect or add repos, or classify file types and folder roles. If the MCP servers are not configured yet, this skill walks through configuring them.
+description: Analyse a feature request or change across multiple related repositories — including processes that talk to each other through IDL interfaces (server/client IPC) — using the Agentic Orchestration MCP servers (an `orchestrator_router` server, and one code-graph server per repo with `search_code`, `trace_interface`, `impact_of`, `query_repo`). Use when the developer asks how to build or change a feature that may touch other repos or processes, asks which repos/processes/interfaces are affected, wants the impact of changing a function or IDL operation, or wants a cross-repo design or Feature Analysis Document. To set up the framework, connect repositories or create the GraphRAG, use the /graphrag-setup skill.
 license: Apache-2.0
 ---
 
@@ -32,7 +32,8 @@ In Copilot Chat (Agent mode) the tools appear under each MCP server's name, e.g.
      done but the servers aren't running. Ask the developer to reload the VS Code window
      and allow the MCP servers (the **MCP: List Servers** command shows their status), and
      to keep Copilot Chat in **Agent** mode — only Agent mode can call MCP tools.
-   - Otherwise offer the first-time setup in [references/setup.md](references/setup.md).
+   - Otherwise offer the first-time setup with the **/graphrag-setup** skill (see
+     [references/setup.md](references/setup.md)).
 2. **Find out which repo you are in.** Read `mcp/config.yaml` at the workspace root;
    `repo_name` is this repo's id and its MCP server's name.
 
@@ -143,4 +144,4 @@ Build it only from what the tools returned:
 - After the analysis, implement changes in the current repo only if the developer asks;
   changes in peer repos are made in those repos.
 - If results for a repo are thin or noisy, suggest reviewing its structure and file
-  types — see "Later changes" in [references/setup.md](references/setup.md).
+  types — use the **/graphrag-setup** skill (see [references/setup.md](references/setup.md)).

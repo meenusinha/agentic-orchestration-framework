@@ -50,6 +50,14 @@ First release for VS Code with GitHub Copilot, on Windows and Linux, under the A
   **Select all** / **Exclude all**, plus sub-folders or file patterns typed or chosen with
   **Browse…**; saved as the `exclude` setting. Step 6 has **Select all** / **Select none**
   per repository and for all. `configure.py` gains `--exclude`.
+- **Map file types in bulk** (step 4): tick any of the file types found in all repositories,
+  choose the kind and language once, and every row for them is filled in. Rows show whether
+  they need an answer (red), hold the scan's suggestion (amber) or are accepted (green).
+- **`/graphrag-setup` agent skill**: the whole setup from Copilot Chat — install, repositories,
+  folders to index or exclude, file types and roles, what to overwrite, estimate, batches and
+  build with a progress line — through `graphrag.py` (status, folders, estimate, build), which
+  shares its code with the setup page. Installed into every connected repository; the
+  `/cross-repo-feature-analysis` skill now points to it for setup.
 - **Running VS Code servers follow changed indexing settings** (components added or left
   for later, exclusions) at their next refresh.
 - **Setting up again** asks before overwriting: keep or reinstall packages; keep or replace

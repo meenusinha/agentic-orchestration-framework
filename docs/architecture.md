@@ -17,6 +17,7 @@ Supported platforms: **Windows and Linux**.
 | Router | `orchestrator/mcp/router_mcp_server.py` | MCP server that picks the repositories relevant to a request |
 | Configuration | `skills/cross-repo-feature-analysis/scripts/` (`scan.py`, `configure.py`), `orchestrator/setup.py` | Scan repositories, write their settings, generate the VS Code configuration |
 | Agent skill | `skills/cross-repo-feature-analysis/` (installed into each repository's `.github/skills/`) | Tells Copilot how to use the tools (`/cross-repo-feature-analysis`) |
+| Setup skill | `.github/skills/graphrag-setup/` (its `SKILL.md` is installed into each repository's `.github/skills/`; the scripts run from the framework) | `/graphrag-setup`: the setup from Copilot Chat. Its `scripts/graphrag.py` (status, folders, estimate, build) uses the same code as the setup page: `gui/graphrag_ops.py` and the `gui/` workers |
 
 ### Code graph engine modules
 
@@ -47,6 +48,7 @@ Each prints JSON lines (progress, then one result) that the page streams.
 | `gui/buildspeed.py` | Records each larger build's real speed (seconds per byte parsed, seconds per unit of embedding work) in `~/.agentic-orchestration/build-speed.json`, numbers only, for later estimates |
 | `gui/verify.py` | Builds (pass 1) and links (pass 2) every graph; reports progress-bar events (repository, stage, done/total, overall fraction weighted by the estimate's expected work per repository and stage, time left in the stage); `--fresh NAME` starts a repository from scratch |
 | `gui/query_worker.py` | Loads the model and all graphs once and answers the query field |
+| `gui/graphrag_ops.py` | Shared by the setup page and `graphrag.py`: connected repositories, validated changes to a repository's settings (excluded folders, components left for later), the estimate arithmetic and batch suggestion, running the workers |
 
 ---
 

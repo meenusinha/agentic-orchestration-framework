@@ -55,15 +55,10 @@ import gitclone  # noqa: E402  (standard library only)
 SCRIPTS = FW / "skills" / "cross-repo-feature-analysis" / "scripts"
 sys.path.insert(0, str(FW / "repo-agent" / "mcp"))
 from codegraph import settings  # noqa: E402  (standard library only)
-ORCH_CFG = FW / "orchestrator" / "mcp" / "config.yaml"
-
-
-def orch_cfg() -> dict:
-    try:
-        import yaml
-        return yaml.safe_load(ORCH_CFG.read_text(encoding="utf-8")) or {}
-    except Exception:
-        return {}
+# shared with the command line of the /graphrag-setup agent skill, so both behave the same
+from graphrag_ops import (ORCH_CFG, clean_plan, configured_repos, orch_cfg, plan_deferred,  # noqa: E402
+                          repo_cfg_path, set_yaml_key, verify_args, write_settings)
+import graphrag_ops  # noqa: E402
 
 
 def model_dir() -> Path:
@@ -258,17 +253,6 @@ def deps_ok() -> bool:
                           capture_output=True).returncode == 0
 
 
-def configured_repos() -> list:
-    cfg = FW / "orchestrator" / "mcp" / "config.yaml"
-    try:
-        import yaml
-        data = yaml.safe_load(cfg.read_text()) or {}
-    except Exception:
-        return []
-    return [{"name": r["name"], "path": r["path"]} for r in data.get("repos") or []
-            if not str(r.get("path", "")).startswith("/absolute/path/to/")]
-
-
 def existing(repo_path) -> dict:
     """What an earlier setup left in a repository — the page asks before overwriting it."""
     root = Path(repo_path).expanduser()
@@ -428,24 +412,6 @@ def job_configure(body):
 
 
 # ── GraphRAG creation / query settings ───────────────────────────────────────
-def set_yaml_key(text: str, key: str, value) -> str:
-    """Replace (or append) a top-level `key: …` in a YAML file, keeping comments and other keys."""
-    import re
-    import yaml
-    if value is None:                                   # remove the key (back to the default)
-        return re.sub(rf"(?m)^{re.escape(key)}:.*(?:\n(?:[ \t]+\S.*|-.*))*\n?", "", text)
-    line = f"{key}: {yaml.safe_dump(value, default_flow_style=True, sort_keys=False).strip().removesuffix('...').strip()}"
-    pattern = re.compile(rf"(?m)^{re.escape(key)}:.*(?:\n(?:[ \t]+\S.*|-.*))*")
-    text = pattern.sub(lambda _: line, text, count=1) if pattern.search(text) else text.rstrip("\n") + f"\n{line}\n"
-    if (yaml.safe_load(text) or {}).get(key) != value:
-        raise ValueError(f"could not update {key!r} safely")
-    return text
-
-
-def repo_cfg_path(r: dict) -> Path:
-    return Path(r["path"]).expanduser() / "mcp" / "config.yaml"
-
-
 def get_settings() -> dict:
     import yaml
     repos = []
@@ -521,85 +487,14 @@ def job_model_path(body):
 
 
 def run_worker(job, script: str, args=()) -> dict:
-    """Run a gui/ worker that prints JSON lines: progress messages go to the log, progress-bar
-    events to job.progress; returns its result. If the worker dies without a result (e.g. out
-    of memory), the end of its error output is reported."""
-    import tempfile
-    errf = tempfile.TemporaryFile(mode="w+", encoding="utf-8", errors="replace")
-    p = subprocess.Popen([sys.executable, str(GUI / script), *args], stdout=subprocess.PIPE,
-                         stderr=errf, text=True, bufsize=1, encoding="utf-8", errors="replace")
-    result = None
-    for line in p.stdout:
-        try:
-            msg = json.loads(line)
-        except ValueError:
-            continue
-        if msg.get("event") == "progress":
-            job.log(msg["msg"])
-        elif msg.get("event") == "bar":
-            job.progress = msg
-        elif msg.get("event") == "result":
-            result = msg
-    p.wait()
-    if not result:
-        errf.seek(0)
-        tail = [l for l in errf.read().splitlines() if l.strip()][-3:]
-        errf.close()
-        raise RuntimeError(f"{script} stopped (exit code {p.returncode})" + (": " + " | ".join(tail) if tail else ""))
-    errf.close()
-    if not result.get("ok"):
-        raise RuntimeError(result.get("error") or f"{script} failed")
-    return result
+    """A gui/ worker as a job: its messages go to the job's log, its progress to the bar."""
+    return graphrag_ops.run_worker(script, args, on_message=job.log, on_bar=lambda b: setattr(job, "progress", b))
 
 
 def job_estimate(job):
     result = run_worker(job, "estimate.py")
     job.log("✓ estimate ready")
     return result
-
-
-def plan_deferred(deferred: dict) -> list:
-    """Validate each repository's components left for a later batch.
-    → [(config path, new `deferred` value)] for the repositories whose setting changes."""
-    import yaml
-    from codegraph import components
-    repos = {r["name"]: r for r in configured_repos()}
-    if not isinstance(deferred or {}, dict):
-        raise ValueError("deferred must map repositories to folders")
-    changes = []
-    for name, paths in (deferred or {}).items():
-        if name not in repos:
-            raise ValueError(f"unknown repository {name!r}")
-        if not isinstance(paths, list) or any(not isinstance(x, str) or not x.strip() for x in paths):
-            raise ValueError(f"{name}: components must be folder names")
-        clean, errors = settings.validate({"deferred": [components.to_setting(x.strip()) for x in paths]})
-        if errors:
-            raise ValueError(f"{name}: {'; '.join(errors)}")
-        p = repo_cfg_path(repos[name])
-        text = p.read_text(encoding="utf-8") if p.exists() else ""
-        if settings.load(yaml.safe_load(text) or {})["deferred"] != clean["deferred"]:
-            set_yaml_key(text, "deferred", clean["deferred"])          # refuses values it can't write safely
-            changes.append((name, p, clean["deferred"]))
-    return changes
-
-
-def write_deferred(changes: list) -> None:
-    for _, p, value in changes:
-        text = p.read_text(encoding="utf-8") if p.exists() else ""
-        p.write_text(set_yaml_key(text, "deferred", value), encoding="utf-8")
-
-
-def clean_plan(plan) -> dict:
-    """Expected seconds per repository from the page's estimate (weights the progress bar)."""
-    names = {r["name"] for r in configured_repos()}
-    out = {}
-    for name, w in (plan or {}).items() if isinstance(plan, dict) else ():
-        try:
-            if name in names:
-                out[name] = {k: min(max(float(w.get(k, 0)), 0.0), 1e7) for k in ("parse", "embed")}
-        except (TypeError, ValueError, AttributeError):
-            continue
-    return out
 
 
 def job_verify(body=None):
@@ -616,10 +511,9 @@ def job_verify(body=None):
         WORKER.stop()                                   # nobody else holds the graphs while they're built
         GRAPH.reset()
         if changes:
-            write_deferred(changes)
-            job.log("Components for this batch saved for " + ", ".join(n for n, _, _ in changes))
-        result = run_worker(job, "verify.py", [a for n in fresh for a in ("--fresh", n)] +
-                            (["--plan", json.dumps(plan)] if plan else []))
+            write_settings(changes)
+            job.log("Components for this batch saved for " + ", ".join(n for n, _, _, _ in changes))
+        result = run_worker(job, "verify.py", verify_args(fresh, plan))
         job.log("✓ GraphRAG created and linked")
         WORKER.stop()                                   # next query loads the fresh graphs
         GRAPH.reset()

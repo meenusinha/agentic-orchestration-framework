@@ -185,7 +185,8 @@ def measure(sample: list, embed, tick, recorded: dict | None = None) -> dict:
     from codegraph.security import redact
     if not sample:
         return dict(DEFAULT_RATES, sample_files=0, sample_bytes=0, source="default")
-    tick(f"Measuring this computer's speed on {len(sample)} sample files …", force=True)
+    tick(f"Reading a sample of {len(sample)} files (speed from this computer's last build) …" if recorded else
+         f"Measuring this computer's speed on {len(sample)} sample files …", force=True)
     texts, nbytes = [], 0
     t0 = time.perf_counter()
     for rel, ab, lang, size in sample:

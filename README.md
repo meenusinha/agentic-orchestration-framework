@@ -25,6 +25,7 @@ You can also run the same searches yourself in a local web page, without Copilot
 3. [Install and set up](#install-and-set-up)
    - [Large repositories: time estimate, batches, progress](#large-repositories-time-estimate-batches-progress)
    - [Setting up again: what is kept and what is overwritten](#setting-up-again-what-is-kept-and-what-is-overwritten)
+   - [Set up from Copilot Chat: /graphrag-setup](#set-up-from-copilot-chat-graphrag-setup)
 4. [Use it in VS Code with Copilot](#use-it-in-vs-code-with-copilot)
 5. [Search without Copilot: queries and the knowledge graph](#search-without-copilot)
 6. [What gets indexed](#what-gets-indexed)
@@ -84,6 +85,10 @@ You can also run the same searches yourself in a local web page, without Copilot
 
 ## Install and set up
 
+There are two ways to set up: the **setup page** below, or **Copilot Chat** with the
+`/graphrag-setup` agent skill (see [Set up from Copilot Chat](#set-up-from-copilot-chat-graphrag-setup)).
+Both ask the same questions and give the same result.
+
 Get the framework, then start the setup page:
 
 ```bash
@@ -100,7 +105,7 @@ browser. It runs on `127.0.0.1` only and is protected by a one-time token. Six s
 | **1. Install** | Click **Install**. The hash-locked packages go into `.venv`; nothing is installed into your system Python. If they're already installed, choose **Keep and continue** or **Reinstall all packages** |
 | **2. Model** | Nothing to do: the included model is checked file by file against its pinned fingerprints (see [Model integrity](#model-integrity-hash-pinning)). Keep it, or type another folder holding the approved model to replace it. Only if `models/` is missing does it ask you to point to another copy |
 | **3. Repositories** | Add each repository to connect, at least two. Either type its folder path (or **Choose folder…**) for a repository you've already cloned, or **Clone from Git**: enter the URL and branch and choose the folder to clone into. If that folder already holds a clone of the same repository, it's updated and switched to the branch instead. Repositories connected before are listed; removing one disconnects it at step 5 (its files stay) |
-| **4. Review** | Check what the scan found: languages, size, processes and libraries, IDL interfaces and the role of each folder. **Choose which folders to index**: untick a folder to exclude it (**Select all** / **Exclude all** per repository), and add sub-folders or file patterns to exclude, typed or with **Browse…**. If a file type is unknown, say what it contains (implementation, interface, configuration, …) and which language to read it as; types found only in excluded folders aren't asked. Answers saved by an earlier setup are shown and can be changed |
+| **4. Review** | Check what the scan found: languages, size, processes and libraries, IDL interfaces and the role of each folder. **Choose which folders to index**: untick a folder to exclude it (**Select all** / **Exclude all** per repository), and add sub-folders or file patterns to exclude, typed or with **Browse…**. If a file type is unknown, say what it contains (implementation, interface, configuration, …) and which language to read it as; types found only in excluded folders aren't asked. **Map several at once:** the bar at the top lists every file type found, in all repositories — tick some (**Select unanswered** / **Select suggested** / **Select all**), choose the kind and language, **Apply**, and all their rows are filled in. Each row shows its state: red *needs an answer*, amber *suggested* (the scan's guess, not confirmed yet), green *accepted* Answers saved by an earlier setup are shown and can be changed |
 | **5. Configure** | Click **Configure**. This writes the VS Code configuration into each repository (see [Files the framework adds](#files-the-framework-adds-to-your-repositories)). For a repository set up before, you first choose what to overwrite (see [Setting up again](#setting-up-again-what-is-kept-and-what-is-overwritten)) |
 | **6. Create GraphRAG** | The page first estimates how long it takes on this computer, per component. Create everything, or choose fewer components as a first batch and add the rest later (see [Large repositories](#large-repositories-time-estimate-batches-progress)). A progress bar shows how far it is and the time left. The page then shows which processes serve and call each IDL interface |
 
@@ -168,6 +173,46 @@ overwritten without asking:
 Always updated, because they must match this framework version and this computer: the
 MCP server code in each repository's `mcp/` folder and the VS Code configuration
 `.vscode/mcp.json`. Your source code and your `knowledge/` folder are never changed.
+
+---
+
+### Set up from Copilot Chat: /graphrag-setup
+
+The framework includes a second agent skill, **`/graphrag-setup`**, that does the whole setup
+from Copilot Chat instead of the setup page:
+
+1. Clone the framework and open its folder in VS Code (the skill is in
+   `.github/skills/graphrag-setup/`, where Copilot finds it).
+2. In Copilot Chat, switch to **Agent** mode and ask, for example:
+
+   > /graphrag-setup connect ../billing-server and ../billing-client and create the GraphRAG
+
+Copilot then works through the same steps as the setup page, running the commands in the
+terminal and asking you every decision:
+
+- **Install:** the hash-locked packages into `.venv`, or keep or reinstall an existing one.
+- **Repositories** to connect, and a clone of any not cloned yet.
+- **Review:** which folders to index or exclude, what unknown file types contain, folder roles.
+- **Configure:** for repositories set up before, what to overwrite or keep.
+- **Estimate**, per component, on this computer.
+- **Batch:** everything now, the suggested first batch, or your own choice.
+- **Build**, with a progress line every few seconds (percentage, time left, stage), then
+  the next batch or stop.
+
+Configure also installs `/graphrag-setup` into every connected repository, so later changes
+(add the components left for later, exclude a folder, rebuild a repository) can be asked for
+from any of them.
+
+The skill drives a command-line tool you can also use yourself, with the framework's
+virtual-environment Python:
+
+```bash
+GR=.github/skills/graphrag-setup/scripts/graphrag.py
+.venv/bin/python $GR status                                  # repositories, GraphRAG, exclusions, batches
+.venv/bin/python $GR folders server --exclude third_party    # or --include, --exclude-all, --include-all
+.venv/bin/python $GR estimate                                # time per component; suggests a first batch
+.venv/bin/python $GR build --suggested                       # or --all, --only R:C, --add R:C, --later R:C, --fresh REPO
+```
 
 ---
 
@@ -293,13 +338,16 @@ Every path can be typed or pasted, as well as chosen with **Browse…**:
 | `.vscode/mcp.json` | Tells VS Code how to start the MCP servers; contains absolute paths on your machine | **No** — it's specific to your machine |
 | `.github/copilot-instructions.md` | Repository-specific instructions for Copilot | Optional |
 | `.github/skills/cross-repo-feature-analysis/` | The agent skill behind `/cross-repo-feature-analysis` | Optional |
+| `.github/skills/graphrag-setup/SKILL.md` | The agent skill behind `/graphrag-setup` (its scripts stay in the framework) | Optional |
 | `.rag_index/` | The knowledge graph (contains code excerpts) | **No** — it's added to `.gitignore` automatically |
 
 ---
 
 ## Command-line alternative
 
-The setup page is the recommended way. The same steps are available as scripts, run with
+The setup page or the `/graphrag-setup` skill is the recommended way. Creating the GraphRAG
+from the command line is described in [Set up from Copilot Chat](#set-up-from-copilot-chat-graphrag-setup)
+(`graphrag.py`). The other steps are available as scripts, run with
 the framework's virtual-environment Python (`.venv/bin/python`; on Windows
 `.venv\Scripts\python.exe`):
 

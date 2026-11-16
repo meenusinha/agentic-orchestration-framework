@@ -109,6 +109,9 @@ INDEX_DIR_NAME   = ".rag_index"
 CONFIG_PATH      = ORCHESTRATOR_DIR / "mcp" / "config.yaml"
 SKILL_NAME       = "cross-repo-feature-analysis"
 SKILL_DIR        = FRAMEWORK_DIR / "skills" / SKILL_NAME
+# The setup skill: its scripts run from the framework, so only SKILL.md is installed into repos.
+SETUP_SKILL_NAME = "graphrag-setup"
+SETUP_SKILL_DIR  = FRAMEWORK_DIR / ".github" / "skills" / SETUP_SKILL_NAME
 
 if not CONFIG_PATH.exists():
     print(f"ERROR: Config not found at {CONFIG_PATH}")
@@ -234,10 +237,18 @@ def _gitignore_index(repo_path: Path) -> bool:
 
 
 def _install_skill(target_dir: Path) -> Path:
-    out = target_dir / ".github" / "skills" / SKILL_NAME        # where VS Code + Copilot finds agent skills
+    """Install the agent skills where VS Code + Copilot finds them: /cross-repo-feature-analysis
+    (whole) and /graphrag-setup (SKILL.md only — it finds the framework through .vscode/mcp.json)."""
+    skills = target_dir / ".github" / "skills"
+    out = skills / SKILL_NAME
     if out.exists():
         shutil.rmtree(out)
-    shutil.copytree(SKILL_DIR, out)
+    shutil.copytree(SKILL_DIR, out, ignore=shutil.ignore_patterns("__pycache__", "*.pyc"))
+    setup_out = skills / SETUP_SKILL_NAME
+    if setup_out.exists():
+        shutil.rmtree(setup_out)
+    setup_out.mkdir(parents=True)
+    shutil.copyfile(SETUP_SKILL_DIR / "SKILL.md", setup_out / "SKILL.md")
     return out
 
 
@@ -374,7 +385,7 @@ for r in resolved:
     mcp_json_path = _write_mcp_json(r["path"])
     instr = r["path"] / ".github" / "copilot-instructions.md"
     instructions_path = f"{instr} (kept as it was)" if _kept(r, "instructions", instr) else _write_copilot_instructions(r)
-    skill = r["path"] / ".github" / "skills" / SKILL_NAME
+    skill = r["path"] / ".github" / "skills" / SKILL_NAME          # both skills are kept or installed together
     skill_path = f"{skill} (kept as it was)" if _kept(r, "skill", skill) else _install_skill(r["path"])
     ignored = _gitignore_index(r["path"])
     print(f"  ✓ {r['name']}")

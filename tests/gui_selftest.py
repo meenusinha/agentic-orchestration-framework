@@ -646,7 +646,47 @@ def _run(a):
         code, r4 = g.call("/api/query", {"mode": "trace", "text": "IPasswordService"})
         check("queries work after setting up again", code == 200 and r4["result"]["trace"].get("found"))
 
-        print("\n14. Restart: the GUI opens on the queries", flush=True)
+        print("\n14. Command line of the /graphrag-setup agent skill", flush=True)
+        gr = FW / ".github" / "skills" / "graphrag-setup" / "scripts" / "graphrag.py"
+
+        def cli(*args):
+            r = subprocess.run([str(venv_py), str(gr), *args], capture_output=True, text=True, encoding="utf-8",
+                               errors="replace", env={**env, "PYTHONUTF8": "1"}, timeout=1800)
+            for l in (r.stdout + r.stderr).splitlines()[-6:]:
+                print("      | " + l[:150], flush=True)
+            return r.returncode, r.stdout + r.stderr
+        code, out = cli("status")
+        check("cli status lists the connected repositories and their GraphRAG",
+              code == 0 and "sample-server" in out and "sample-client" in out and "GraphRAG built" in out)
+        code, out = cli("folders", "sample-server", "--exclude", "docs")
+        check("cli folders --exclude saves the exclusion", code == 0 and read_yaml(srv_path / "mcp" / "config.yaml").get("exclude") == ["docs"]
+              and re.search(r"no\s+docs/", out))
+        code, out = cli("folders", "sample-server", "--include", "docs")
+        check("cli folders --include indexes it again", code == 0 and read_yaml(srv_path / "mcp" / "config.yaml").get("exclude") == [])
+        code, out = cli("folders", "sample-server", "--exclude", "../outside")
+        check("cli refuses a path outside the repository", code != 0 and "inside the repository" in out)
+        code, out = cli("estimate")
+        check("cli estimate shows the components and the time", code == 0 and "Creating the whole GraphRAG takes" in out
+              and re.search(r"(?m)^\s+yes\s+src\b", out))
+        code, out = cli("build", "--only", "sample-server:src", "--only", "sample-server:idl", "--only", "sample-client:src",
+                        "--only", "sample-client:idl")
+        cfg_d = read_yaml(srv_path / "mcp" / "config.yaml").get("deferred") or []
+        check("cli build --only creates a batch; the rest is left for later",
+              code == 0 and "Still left for later" in out and "docs" in cfg_d and "src" not in cfg_d, str(cfg_d))
+        check("cli build prints a progress bar with the stage", re.search(r"\[[#-]{30}\]\s+\d+%.*(parsing|embedding|saving)", out))
+        code, out = cli("build", "--add", "sample-server:docs")
+        check("cli build --add adds a component", code == 0 and "docs" not in (read_yaml(srv_path / "mcp" / "config.yaml").get("deferred") or []))
+        code, out = cli("build", "--add", "sample-server:no-such-folder")
+        check("cli refuses an unknown component and lists the real ones", code != 0 and "has no component" in out and "src" in out)
+        code, out = cli("build", "--all")
+        check("cli build --all: everything in the GraphRAG", code == 0 and "Everything is in the GraphRAG" in out
+              and not read_yaml(srv_path / "mcp" / "config.yaml").get("deferred"))
+        sk = cli_path / ".github" / "skills"
+        check("both agent skills installed in each repository (the setup skill as SKILL.md only)",
+              (sk / "graphrag-setup" / "SKILL.md").is_file() and not (sk / "graphrag-setup" / "scripts").exists()
+              and (sk / "cross-repo-feature-analysis" / "SKILL.md").is_file())
+
+        print("\n15. Restart: the GUI opens on the queries", flush=True)
         g.call("/api/quit", {})
         proc.wait(timeout=30)
         proc, url = start_gui(env)

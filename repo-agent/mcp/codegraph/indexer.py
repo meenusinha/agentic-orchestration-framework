@@ -32,7 +32,8 @@ from .structure import resolve
 
 INDEX_FORMAT = 1
 _NOT_INDEXED_MARK = b"<!-- agentic-orchestration: framework template, not indexed -->"
-_FRAMEWORK_DIRS = (".github/skills/cross-repo-feature-analysis/",)   # installed by the setup, not the repo's own code
+_FRAMEWORK_DIRS = (".github/skills/cross-repo-feature-analysis/",   # installed by the setup, not the repo's own code
+                   ".github/skills/graphrag-setup/")
 EMBED_KINDS = {FUNCTION, METHOD, CLASS, TYPE, MACRO, IDL_INTERFACE, IDL_OPERATION, IDL_ATTRIBUTE, IDL_TYPE, DOC_SECTION, TEXT,
                MODULE, NAMESPACE, TARGET}
 NOT_SEARCHED_ROLES = {"test"}          # tests are evidence (TESTS edges), never results
