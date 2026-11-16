@@ -1,10 +1,14 @@
 #!/usr/bin/env python3
 """Build every configured repo's code graph and report what was found (setup GUI, last step).
 
-Prints JSON lines: {"event": "progress", "msg": ...} while working, then one
-{"event": "result", ...} with per-repo stats and the cross-repo interface map.
+Prints JSON lines: {"event": "progress", "msg": ...} while working, {"event": "bar", ...}
+for the progress bar (repository, stage, done/total, overall fraction, time left in the
+stage), then one {"event": "result", ...} with per-repo stats and the cross-repo interface map.
 Two passes: the first builds each graph and publishes its IDL interfaces, the
-second (fast) links every repo to its peers' interfaces."""
+second (fast) links every repo to its peers' interfaces.
+
+    verify.py [--fresh NAME ...]     NAME: start that repository's GraphRAG from scratch
+                                     (cached vectors are dropped too)"""
 
 import os
 import sys
@@ -26,7 +30,9 @@ def _ignore_foreign_pythonpath():
 _ignore_foreign_pythonpath()
 
 
+import argparse
 import json
+import time
 from pathlib import Path
 
 for _s in (sys.stdout, sys.stderr):      # Windows consoles/pipes default to cp1252, which cannot print ✓ — … etc.
@@ -41,7 +47,41 @@ def emit(**kw):
     print(json.dumps(kw), flush=True)
 
 
+# Share of one repository's build taken by each stage — for the overall progress bar only.
+STAGES = {"read": (0.0, 0.05), "parse": (0.05, 0.25), "embed": (0.25, 0.95), "write": (0.95, 1.0)}
+PASS_SHARE = {1: (0.0, 0.9), 2: (0.9, 1.0)}         # building, then linking (fast: vectors are reused)
+
+
+class Bar:
+    """Turns build progress into throttled bar events with an overall fraction and the time
+    left in the current stage (from the rate so far)."""
+    def __init__(self, n_repos: int, every: float = 0.4):
+        self.n, self.every, self.last, self.stage_t0, self.key = n_repos, every, 0.0, time.time(), None
+
+    def hook(self, p: int, i: int, repo: str):
+        def progress(stage: str, done: int, total: int):
+            now = time.time()
+            if (p, repo, stage) != self.key:
+                self.key, self.stage_t0, self.last = (p, repo, stage), now, 0.0
+            finished = total and done >= total
+            if now - self.last < self.every and not finished:
+                return
+            self.last = now
+            lo, hi = STAGES.get(stage, (0.0, 1.0))
+            frac = lo + (hi - lo) * (done / total if total else 1.0)
+            plo, phi = PASS_SHARE[p]
+            overall = plo + (phi - plo) * (i + frac) / self.n
+            elapsed = now - self.stage_t0
+            left = elapsed / done * (total - done) if done and total and elapsed > 2 else None
+            emit(event="bar", repo=repo, phase="building" if p == 1 else "linking", stage=stage, done=done,
+                 total=total, overall=round(min(overall, 1.0), 4), stage_seconds_left=left)
+        return progress
+
+
 def main():
+    ap = argparse.ArgumentParser()
+    ap.add_argument("--fresh", action="append", default=[], metavar="NAME")
+    args = ap.parse_args()
     import yaml
     cfg = yaml.safe_load((FW / "orchestrator" / "mcp" / "config.yaml").read_text()) or {}
     repos = [r for r in cfg.get("repos") or [] if not str(r.get("path", "")).startswith("/absolute/path/to/")]
@@ -55,8 +95,9 @@ def main():
     model = settings.model_dir(FW, cfg)
     peers = [{"name": r["name"], "path": str(Path(r["path"]).expanduser())} for r in repos]
     rags, stats = {}, {}
+    bar = Bar(len(repos))
     for p in (1, 2):
-        for r in repos:
+        for i, r in enumerate(repos):
             root = Path(r["path"]).expanduser()
             rc = yaml.safe_load((root / "mcp" / "config.yaml").read_text()) if (root / "mcp" / "config.yaml").exists() else {}
             emit(event="progress", msg=("Building" if p == 1 else "Linking") + f" {r['name']} …")
@@ -64,8 +105,17 @@ def main():
                 rags[r["name"]] = RepoRAG(r["name"], str(root), settings.roots(root, rc), embedding_model=str(model),
                                           file_types=rc.get("file_types"), structure=rc.get("structure"),
                                           extra_extensions=rc.get("extra_extensions"), peers=peers,
-                                          **settings.rag_kwargs(rc))
-            stats[r["name"]] = rags[r["name"]].build_or_load_index()
+                                          progress=bar.hook(p, i, r["name"]), **settings.rag_kwargs(rc))
+                if r["name"] in args.fresh:
+                    emit(event="progress", msg=f"Starting {r['name']} from scratch (stored graph and vectors removed) …")
+                    rags[r["name"]].clear_index()
+            rags[r["name"]].progress = bar.hook(p, i, r["name"])
+            stats[r["name"]] = st = rags[r["name"]].build_or_load_index() or {}
+            if st.get("rebuilt"):
+                emit(event="progress", msg=f"  {r['name']}: {st['files']} files, {st['nodes']} units — "
+                                          f"{st.get('embedded', 0)} embedded, {st.get('reused', 0)} reused")
+            else:
+                emit(event="progress", msg=f"  {r['name']}: up to date ({st.get('files', 0)} files)")
     out, imap = [], {}
     for r in repos:
         rag = rags[r["name"]]

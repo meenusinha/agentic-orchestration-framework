@@ -35,4 +35,15 @@ First release for VS Code with GitHub Copilot, on Windows and Linux, under the A
   and query settings (top_k, budget, candidate pool, rank fusion, impact depth, role weights),
   router settings; defaults shown, values validated, comments in config files kept.
 - **Typed paths** for the model folder (used in place, hash-checked) and for repositories.
+- **Time estimate and batches** (step 6): each repository is divided into components; the
+  time is estimated per component from a sample of the real code embedded on this computer,
+  and files already in the GraphRAG are recognised. Large GraphRAGs can be created in
+  batches; components left for later are kept in the `deferred` setting and added in later
+  batches, reusing everything built before.
+- **Progress bar** while the GraphRAG is created: repository, stage, units done, time left.
+- **Setting up again** asks before overwriting: keep or reinstall packages; keep or replace
+  the model; disconnect removed repositories; per repository, overwrite or keep folder roles
+  and file types, GraphRAG settings, Copilot instructions and the agent skill; update or start
+  a GraphRAG from scratch. `configure.py` gains `--replace-roles`, `--reset-settings`,
+  `--keep` and `--drop`; `orchestrator/setup.py` gains `--keep`.
 - **Documentation**: architecture, security considerations, security evidence.

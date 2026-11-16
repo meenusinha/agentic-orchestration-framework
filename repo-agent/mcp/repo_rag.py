@@ -156,7 +156,8 @@ class RepoRAG:
                  file_types: dict = None, structure: list = None, extra_extensions: list = None,
                  peers: list = None, top_k: int = 5, budget_tokens: int = 6000, index_dir: str = None,
                  exclude: list = None, max_file_bytes: int = 2_000_000, embed_batch_size: int = 64,
-                 candidate_pool: int = 60, rrf_k: int = 60, role_weights: dict = None, impact_depth: int = 2):
+                 candidate_pool: int = 60, rrf_k: int = 60, role_weights: dict = None, impact_depth: int = 2,
+                 progress=None):
         self.repo_name = repo_name
         self.repo_root = Path(repo_root)
         self.top_k, self.budget = top_k, budget_tokens
@@ -165,6 +166,7 @@ class RepoRAG:
         self.batch = max(1, int(embed_batch_size))
         self.search_opts = {"candidate_pool": candidate_pool, "rrf_k": rrf_k, "role_weights": role_weights}
         self.impact_depth = impact_depth
+        self.progress = progress or (lambda stage, done, total: None)    # (stage, done, total) while building
         self.index_dir = Path(index_dir) if index_dir else self.repo_root / ".rag_index"
         if not embedding_model:
             raise RuntimeError("No embedding model configured (EMBEDDING_MODEL_PATH)")
@@ -185,10 +187,12 @@ class RepoRAG:
     def _embed(self, texts):
         out = []
         for i in range(0, len(texts), self.batch):
+            self.progress("embed", i, len(texts))
             out.extend(np.asarray(self._model.encode(texts[i:i + self.batch], normalize_embeddings=True,
                                                      show_progress_bar=False), dtype=np.float32))
             if len(texts) > 256 and (i // self.batch) % 10 == 0:
                 log(self.repo_name, "INDEX", f"  Embedding: {min(i + self.batch, len(texts))}/{len(texts)}")
+        self.progress("embed", len(texts), len(texts))
         return out
 
     def _embed_query(self, q: str):
@@ -199,10 +203,18 @@ class RepoRAG:
         log(self.repo_name, "INDEX", "Building/loading code graph...")
         self.store = Store(self.index_dir)
         stats = build(self.cfg, self.store, self._embed, self._model_sha,
-                      log=lambda lvl, msg: log(self.repo_name, lvl, msg), force=force)
+                      log=lambda lvl, msg: log(self.repo_name, lvl, msg), force=force, progress=self.progress)
         self.search = GraphSearch(self.store, self.repo_name, self._embed_query, self.cfg.peers, **self.search_opts)
         log(self.repo_name, "INDEX", "Code graph ready")
         return stats
+
+    def clear_index(self) -> None:
+        """Start from scratch: remove the stored graph and every cached vector."""
+        store = Store(self.index_dir)
+        try:
+            store.clear()
+        finally:
+            store.close()
 
     def refresh(self) -> dict:
         """Re-check files and peers; rebuild only if something changed."""

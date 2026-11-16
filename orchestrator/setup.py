@@ -14,7 +14,11 @@ What it does:
 
 Usage:
   cd orchestrator/
-  python setup.py
+  python setup.py [--keep NAME=instructions] [--keep NAME=skill]
+
+--keep leaves that repo's existing Copilot instructions or agent skill as they are
+(for example after editing them by hand). The VS Code MCP configuration is always
+regenerated, because it holds this machine's paths.
 """
 
 import os
@@ -37,6 +41,7 @@ def _ignore_foreign_pythonpath():
 _ignore_foreign_pythonpath()
 
 
+import argparse
 import json
 import shutil
 from pathlib import Path
@@ -76,6 +81,16 @@ def _require_venv(what: str) -> None:
 
 _require_supported_os("orchestrator/setup.py")
 _require_venv("orchestrator/setup.py")
+
+_ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
+_ap.add_argument("--keep", action="append", default=[], metavar="NAME=ITEM",
+                 help="keep a repo's existing file as it is; ITEM: instructions or skill")
+KEEP: set[tuple[str, str]] = set()
+for _k in _ap.parse_args().keep:
+    _n, _sep, _item = _k.partition("=")
+    if not _sep or _item not in ("instructions", "skill"):
+        _ap.error(f"--keep {_k}: expected NAME=instructions or NAME=skill")
+    KEEP.add((_n, _item))
 
 try:
     import yaml
@@ -350,10 +365,17 @@ def _write_copilot_instructions(repo: dict) -> Path:
 # ── Run ───────────────────────────────────────────────────────────────────────
 print(f"\nOrchestrator setup — {len(resolved)} repo(s) found in config\n")
 
+def _kept(r: dict, item: str, path: Path) -> bool:
+    """True if the developer chose to keep this existing file (a missing one is always written)."""
+    return (r["name"], item) in KEEP and path.exists()
+
+
 for r in resolved:
     mcp_json_path = _write_mcp_json(r["path"])
-    instructions_path = _write_copilot_instructions(r)
-    skill_path = _install_skill(r["path"])
+    instr = r["path"] / ".github" / "copilot-instructions.md"
+    instructions_path = f"{instr} (kept as it was)" if _kept(r, "instructions", instr) else _write_copilot_instructions(r)
+    skill = r["path"] / ".github" / "skills" / SKILL_NAME
+    skill_path = f"{skill} (kept as it was)" if _kept(r, "skill", skill) else _install_skill(r["path"])
     ignored = _gitignore_index(r["path"])
     print(f"  ✓ {r['name']}")
     print(f"      mcp.json            → {mcp_json_path}")

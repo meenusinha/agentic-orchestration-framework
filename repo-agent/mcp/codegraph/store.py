@@ -119,6 +119,15 @@ class Store:
             self.db.execute("ROLLBACK")
             raise
 
+    def clear(self) -> None:
+        """Empty the graph, including cached vectors, in one transaction (works while other
+        processes have the file open, unlike deleting it). The next build starts from scratch."""
+        with self.write() as db:
+            for t in ("meta", "files", "nodes", "edges", "embeddings", "iface_refs"):
+                db.execute(f"DELETE FROM {t}")
+            if self.fts:
+                db.execute("DELETE FROM nodes_fts")
+
     # ── meta ──────────────────────────────────────────────────────────────
     def meta(self, key, default=None):
         row = self.db.execute("SELECT value FROM meta WHERE key=?", (key,)).fetchone()

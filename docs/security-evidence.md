@@ -134,6 +134,8 @@ original files, which contain LF only.)
 | Component | Evidence |
 |---|---|
 | Setup GUI (`setup_gui.py`) | Standard library only. `127.0.0.1` only; per-session token on every API call; Host check (DNS rebinding); JSON-only POSTs (CSRF); strict Content-Security-Policy (no external resources, no `eval`, no framing); HTML-escaped output; no shell. All verified by the self-test |
+| Time estimate and batches (`gui/estimate.py`, `codegraph/components.py`) | Standard library and the approved model only. The estimate reads files and opens stored graphs read-only (`mode=ro`); its sample is embedded locally and nothing is written. Batch choices are validated as folders inside the repository before they are saved. Verified by the self-test (a component outside the repository is refused) |
+| Setting up again | Every overwrite of an earlier setup is an explicit choice; the self-test verifies that an edited, kept Copilot instructions file stays unchanged, that roles and settings are replaced or reset only when chosen, and that a disconnected repository's files are left in place |
 | Git cloning (`gui/gitclone.py`) | Standard library only. Refuses option-like values and the command-running `ext::`/`fd::` transports — **verified that a crafted `ext::` URL ran nothing**; validates branch and folder names; never overwrites a folder; git never prompts for passwords |
 | Secret handling (`codegraph/security.py`) | Secret-store files never indexed; 10 redaction patterns applied before parsing, embedding, storage or output |
 | Storage | Graph, reports and logs written `0600` in `0700` folders, atomically; logs never follow symlinks and hide code unless explicitly enabled |

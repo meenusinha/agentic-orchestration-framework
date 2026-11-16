@@ -121,6 +121,18 @@ color:var(--muted);font-size:10.5px;font-weight:700;vertical-align:1px}.tip:focu
 .fp{font:11.5px ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;color:var(--muted)}
 .hist{display:flex;justify-content:space-between;align-items:center;gap:10px;padding:9px 4px;border-bottom:1px solid var(--line2);font-size:13px}
 .hist:last-child{border-bottom:0}.hist:hover{background:var(--soft)}
+/* overwrite choices, estimate, batches, progress */
+.notice{border:1px solid #fde68a;background:var(--warn-soft);border-radius:10px;padding:12px 14px;margin:12px 0;font-size:13.5px}
+.notice.info{border-color:#bfdbfe;background:var(--accent-soft)}
+.opts label{display:flex;gap:9px;align-items:flex-start;margin:7px 0;font-size:13.5px;color:var(--ink2)}.opts input{margin-top:3px}
+.opts .what{color:var(--muted);font-size:12px}
+.comps{max-height:340px;overflow:auto;border:1px solid var(--line2);border-radius:10px;margin-top:6px}.comps table{margin:0}
+.comps td,.comps th{padding:6px 10px}.comps th{position:sticky;top:0}
+.st{font-size:11px;padding:1px 8px;border-radius:999px;background:var(--chip);color:var(--muted);white-space:nowrap}
+.st.indexed{background:var(--ok-soft);color:var(--ok)}.st.later{background:var(--warn-soft);color:var(--warn)}
+.prog{border:1px solid var(--line);border-radius:var(--radius);padding:14px 16px;margin:14px 0;background:#fff}
+.pbar{height:10px;background:var(--chip);border-radius:999px;overflow:hidden;margin:8px 0}
+.pbar>i{display:block;height:100%;width:0;background:linear-gradient(90deg,#2563eb,#7c3aed);transition:width .4s}
 </style>
 </head>
 <body>
@@ -147,6 +159,7 @@ color:var(--muted);font-size:10.5px;font-weight:700;vertical-align:1px}.tip:focu
       <h2>1. Install</h2>
       <p class="sub">Installs the hash-verified Python packages into the framework's own virtual environment. Nothing is installed into your system Python.</p>
       <div id="installStatus"></div>
+      <div id="installAsk"></div>
       <div class="row"><button class="primary" id="installBtn">Install</button><span class="spacer"></span><button id="installNext" class="primary">Continue</button></div>
       <div class="log" id="installLog"></div>
     </section>
@@ -204,9 +217,12 @@ color:var(--muted);font-size:10.5px;font-weight:700;vertical-align:1px}.tip:focu
 
     <section data-step="verify">
       <h2>6. Create GraphRAG</h2>
-      <p class="sub" id="createAsk">Create the GraphRAG for these repositories now? It parses every repository into whole functions, classes and IDL operations, links them across repositories and builds the search index — locally, no AI service involved. The first build takes a while.</p>
-      <div class="row"><button class="primary" id="verifyBtn">Yes, create the GraphRAG</button></div>
+      <p class="sub" id="createAsk">Create the GraphRAG for these repositories now? It parses every repository into whole functions, classes and IDL operations, links them across repositories and builds the search index — locally, no AI service involved. First, an estimate of how long it takes on this computer: for large repositories you can create it in batches, a few components at a time.</p>
+      <div id="estBox"></div>
+      <div class="log" id="estLog"></div>
+      <div id="progBox"></div>
       <div class="log" id="verifyLog"></div>
+      <div id="batchBox"></div>
       <div id="verifyResult"></div>
     </section>
     <section data-step="graph">
@@ -228,7 +244,7 @@ color:var(--muted);font-size:10.5px;font-weight:700;vertical-align:1px}.tip:focu
         <div style="margin-top:12px" class="small"><span class="tipwrap" id="setWeightsHelp" data-tip="">Ranking weight per folder role (0 = never returned)<span class="tip" tabindex="0" aria-label="">i</span></span></div><div class="wgrid" id="setWeights" style="margin-top:6px"></div></div>
       <div class="card"><h3>Router <span class="small">(all repositories)</span></h3><div class="sgrid" id="setRouter"></div></div>
       <div class="row"><button id="setReset">Reset to defaults</button><span class="spacer"></span><button class="primary" id="setSave">Save</button></div>
-      <div id="setResult" style="margin-top:12px"></div><div class="log" id="setLog"></div>
+      <div id="setResult" style="margin-top:12px"></div><div id="setProg"></div><div class="log" id="setLog"></div>
     </section>
 
     <section data-step="queries">
@@ -253,7 +269,9 @@ const STEPS = [["install","Install"],["model","Model"],["repos","Repositories"],
 const ROLES = ["interface","implementation","internal","external","library","test","build","generated","docs","tooling","config","data","example"];
 const KINDS = ["implementation","interface","server-config","config","docs","data","ignore"];
 const LANGS = ["c","cpp","python","idl","perl","matlab","java","javascript","typescript","go","rust","csharp","markdown","text"];
-let S = {}, done = new Set(), cur = "install", repos = [], scans = [], answers = {};
+let S = {}, done = new Set(), cur = "install", repos = [], scans = [], answers = {}, saved = {}, ow = {};
+const fmtBytes = n => n >= 1e9 ? (n/1e9).toFixed(1)+" GB" : n >= 1e6 ? (n/1e6).toFixed(1)+" MB" : n >= 1e3 ? Math.round(n/1e3)+" KB" : n+" B";
+const fmtDur = s => s < 60 ? "under a minute" : s < 5400 ? `about ${Math.round(s/60)} min` : `about ${Math.floor(s/3600)} h ${Math.round((s % 3600)/60)} min`;
 
 const $ = s => document.querySelector(s);
 const esc = s => String(s ?? "").replace(/[&<>"']/g, c => ({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]));
@@ -262,7 +280,7 @@ async function api(path, body) {
     {method:"POST", headers:{"X-Token":T,"Content-Type":"application/json"}, body:JSON.stringify(body)});
   const j = await r.json(); if (!r.ok) { const e = new Error(j.error || r.statusText); e.details = j; throw e; } return j;
 }
-function runJob(start, logEl) {
+function runJob(start, logEl, onProgress) {
   return new Promise(async (resolve, reject) => {
     let id; try { id = (await start()).job; } catch (e) { return reject(e); }
     logEl.style.display = "block"; logEl.textContent = ""; let since = 0;
@@ -270,6 +288,7 @@ function runJob(start, logEl) {
       try {
         const j = await api(`/api/job/${id}?since=${since}`); since = j.next;
         if (j.lines.length) { logEl.textContent += j.lines.join("\n") + "\n"; logEl.scrollTop = logEl.scrollHeight; }
+        if (onProgress && j.progress) onProgress(j.progress);
         if (j.done) return j.ok ? resolve(j.result) : reject(new Error((j.lines.slice(-1)[0]||"failed").replace(/^ERROR: /,"")));
         setTimeout(tick, 600);
       } catch (e) { reject(e); }
@@ -287,18 +306,22 @@ function nav() {
   document.querySelectorAll("nav li.reach").forEach(li => li.onclick = () => go(li.dataset.k));
   document.querySelectorAll("main section").forEach(s => s.classList.toggle("active", s.dataset.step === cur));
 }
-function go(k) { cur = k; nav(); ({model:showModel, repos:showRepos, review:showReview, configure:showConfigure, queries:showHistory, graph:showGraph, settings:showSettings})[k]?.(); window.scrollTo(0,0); }
+function go(k) { cur = k; nav(); ({model:showModel, repos:showRepos, review:showReview, configure:showConfigure, verify:showVerify, queries:showHistory, graph:showGraph, settings:showSettings})[k]?.(); window.scrollTo(0,0); }
 function finish(k, next) { done.add(k); go(next); }
 const status = (ok, text) => `<div class="status"><b class="${ok?"ok":"warn"}">${ok?"✓":"●"}</b>${text}</div>`;
 
 /* 1 install */
 async function showInstall() {
   $("#installStatus").innerHTML = status(S.deps_ok, S.deps_ok ? "Packages installed in <code>"+esc(S.python)+"</code>" : "Packages not installed yet");
-  $("#installBtn").style.display = S.deps_ok ? "none" : ""; $("#installNext").disabled = !S.deps_ok;
+  $("#installAsk").innerHTML = S.deps_ok ? `<div class="notice info">Already installed by an earlier setup. <b>Keep</b> the installed packages and continue, or <b>reinstall</b> every package from the hash-locked list (overwrites the installed ones — useful if the environment was changed or damaged).</div>` : "";
+  $("#installBtn").textContent = S.deps_ok ? "Reinstall all packages" : "Install";
+  $("#installBtn").classList.toggle("primary", !S.deps_ok);
+  $("#installNext").textContent = S.deps_ok ? "Keep and continue" : "Continue";
+  $("#installNext").disabled = !S.deps_ok;
 }
 $("#installBtn").onclick = async () => {
   $("#installBtn").disabled = true;
-  try { await runJob(() => api("/api/install", {}), $("#installLog")); S = await api("/api/state"); showInstall(); finish("install","model"); }
+  try { await runJob(() => api("/api/install", {force: !!S.deps_ok}), $("#installLog")); S = await api("/api/state"); showInstall(); finish("install","model"); }
   catch (e) { $("#installStatus").innerHTML = status(false, `<span class="bad">${esc(e.message)}</span>`); }
   $("#installBtn").disabled = false;
 };
@@ -308,7 +331,8 @@ $("#installNext").onclick = () => finish("install","model");
 function showModel() {
   const ok = S.model_ok;
   $("#modelStatus").innerHTML = ok
-    ? status(true, "Model ready and verified (all files match their fingerprints)" + (S.model_custom ? " — used in place from the folder below" : ""))
+    ? status(true, "Model ready and verified (all files match their fingerprints)" + (S.model_custom ? " — used in place from the folder below" : "")) +
+      `<div class="notice info">Already set up. <b>Keep</b> it (Continue), or type another folder below to <b>replace</b> it — the new folder is checked before anything changes.</div>`
     : status(false, "The model is not usable: " + esc(S.model_problem || "missing") + ". Type the path of a folder holding the approved model, or restore the included one with <code>git checkout -- models/</code>.");
   const copies = (S.model_copies||[]).map(c => `<div class="cmd"><code>${esc(c)}</code><button data-use="${esc(c)}">Use this folder</button></div>`).join("");
   $("#modelChoices").innerHTML = `
@@ -319,7 +343,7 @@ function showModel() {
     <p class="small">Type or paste a path. The folder is used where it is (nothing is copied), after every file is checked against its pinned fingerprint.
       ${S.model_custom ? `<button class="link" id="modelDefault">Use the included model instead</button>` : ""}
       ${!ok ? `Or <button class="link" id="modelCopy">copy it into the framework</button>.` : ""}</p>
-    ${ok ? `<div class="row"><span class="spacer"></span><button class="primary" id="modelNext">Continue</button></div>` : ""}`;
+    ${ok ? `<div class="row"><span class="spacer"></span><button class="primary" id="modelNext">Keep and continue</button></div>` : ""}`;
   document.querySelectorAll("[data-use]").forEach(b => b.onclick = () => useModelFolder(b.dataset.use));
   $("#modelBrowse").onclick = () => pick(p => $("#modelPath").value = p, $("#modelPath").value);
   $("#modelUse").onclick = () => $("#modelPath").value.trim() && useModelFolder($("#modelPath").value.trim());
@@ -347,11 +371,16 @@ function addRepo(path) {
   let name = slug(path), n = 2; while (repos.some(r => r.name === name)) name = slug(path) + "-" + n++;
   repos.push({name, path}); showRepos();
 }
+const connected = name => (S.repos||[]).find(x => x.name === name);
+const dropped = () => (S.repos||[]).filter(x => !repos.some(r => r.name === x.name));
 function showRepos() {
-  $("#repoList").innerHTML = repos.length ? repos.map((r,i) => `<div class="repo">
-      <input type="text" value="${esc(r.name)}" data-i="${i}" class="rname" title="Short id for this repo">
-      <span class="path">${esc(r.path)}</span><button class="link" data-rm="${i}">Remove</button></div>`).join("")
-    : `<p class="small">No repositories yet.</p>`;
+  const gone = dropped();
+  $("#repoList").innerHTML = (repos.length ? repos.map((r,i) => `<div class="repo">
+      <input type="text" value="${esc(r.name)}" data-i="${i}" class="rname" title="Short id for this repo" ${connected(r.name) ? "disabled" : ""}>
+      <span class="path">${esc(r.path)}${connected(r.name) ? ` <span class="st indexed">connected before</span>` : ""}</span><button class="link" data-rm="${i}">Remove</button></div>`).join("")
+    : `<p class="small">No repositories yet.</p>`) +
+    (gone.length ? `<div class="notice">Removed: <b>${gone.map(x => esc(x.name)).join(", ")}</b> — disconnected when you click Configure (step 5). Its files, settings and GraphRAG stay in the repository folder. <button class="link" id="undoRm">Undo</button></div>` : "");
+  if ($("#undoRm")) $("#undoRm").onclick = () => { gone.forEach(x => repos.push({name:x.name, path:x.path})); showRepos(); };
   document.querySelectorAll(".rname").forEach(inp => inp.onchange = () => repos[+inp.dataset.i].name = inp.value.trim().replace(/[^A-Za-z0-9_-]+/g,"-"));
   document.querySelectorAll("[data-rm]").forEach(b => b.onclick = () => { repos.splice(+b.dataset.rm,1); showRepos(); });
   const sug = (S.suggestions||[]).filter(p => !repos.some(r => r.path === p));
@@ -411,10 +440,12 @@ async function showReview() {
   if (!scans.length) {
     $("#reviewBody").innerHTML = "Scanning…"; $("#reviewNext").disabled = true;
     try { scans = (await api("/api/scan", {repos})).repos; } catch (e) { $("#reviewBody").innerHTML = `<p class="bad">${esc(e.message)}</p>`; return; }
-    answers = {};
-    scans.forEach(sc => { answers[sc.name] = {roles:{}, types:{}};
-      (sc.folders||[]).forEach(f => answers[sc.name].roles[f.folder] = f.role);
-      (sc.unknown_types||[]).forEach(u => answers[sc.name].types[u.ext] = {kind:u.kind||"", parse_as:u.parse_as||""}); });
+    answers = {}; saved = {};
+    scans.forEach(sc => { answers[sc.name] = {roles:{}, types:{}}; saved[sc.name] = {roles:{}, types:{}};
+      (sc.folders||[]).forEach(f => { answers[sc.name].roles[f.folder] = f.role; saved[sc.name].roles[f.folder] = f.role; });
+      (sc.unknown_types||[]).forEach(u => answers[sc.name].types[u.ext] = {kind:u.kind||"", parse_as:u.parse_as||""});
+      (sc.saved_types||[]).forEach(u => { answers[sc.name].types[u.ext] = {kind:u.kind||"", parse_as:u.parse_as||"", saved:true};
+        saved[sc.name].types[u.ext] = {kind:u.kind||"", parse_as:u.parse_as||""}; }); });
   }
   const sel = (opts, v, cls, attrs) => `<select class="${cls}" ${attrs}>${opts.map(o => `<option ${o===v?"selected":""}>${o}</option>`).join("")}</select>`;
   $("#reviewBody").innerHTML = scans.map(sc => {
@@ -423,20 +454,22 @@ async function showReview() {
     const procs = (sc.targets||[]).map(t => `<span class="chip">${esc(t.kind)}: ${esc(t.name)}</span>`).join("") || `<span class="small">no Makefile / CMake targets found</span>`;
     const ifs = (sc.interfaces||[]).map(i => `<span class="chip">${esc(i.name)} (${i.operations.length} ops)</span>`).join("") || `<span class="small">none</span>`;
     const langs = Object.entries(sc.languages||{}).map(([l,n]) => `<span class="chip">${esc(l)} ${n}</span>`).join("");
-    const folders = (sc.folders||[]).map(f => `<tr><td><code>${esc(f.folder ? f.folder+"/" : "(top level)")}</code></td><td>${f.files}</td>
+    const folders = (sc.folders||[]).map(f => `<tr><td><code>${esc(f.folder ? f.folder+"/" : "(top level)")}</code>${f.folder && f.role !== f.auto_role ? ` <span class="st indexed" title="Saved by an earlier setup; automatic role: ${esc(f.auto_role)}">saved</span>` : ""}</td><td>${f.files}</td>
       <td>${f.folder ? sel(ROLES, a.roles[f.folder], "role", `data-r="${esc(sc.name)}" data-f="${esc(f.folder)}"`) : esc(f.role)}</td></tr>`).join("");
-    const unk = (sc.unknown_types||[]).map(u => { const t = a.types[u.ext];
-      return `<tr><td><code>${esc(u.ext)}</code><div class="small">${u.count} file(s), e.g. ${esc(u.sample)}</div><div class="small">looks like ${esc(u.looks_like)}</div></td>
+    const types = [...(sc.unknown_types||[]), ...(sc.saved_types||[]).map(u => ({...u, saved:true}))];
+    const unk = types.map(u => { const t = a.types[u.ext];
+      return `<tr><td><code>${esc(u.ext)}</code>${u.saved ? ` <span class="st indexed">answered before</span>` : `<div class="small">${u.count} file(s), e.g. ${esc(u.sample)}</div><div class="small">looks like ${esc(u.looks_like)}</div>`}</td>
       <td>${sel(["", ...KINDS], t.kind, "kind" + (t.kind ? "" : " need"), `data-r="${esc(sc.name)}" data-e="${esc(u.ext)}"`)}</td>
       <td>${t.kind === "ignore" ? "<span class='small'>not indexed</span>" : sel(["", ...LANGS], t.parse_as, "lang" + (t.parse_as ? "" : " need"), `data-r="${esc(sc.name)}" data-e="${esc(u.ext)}"`)}</td></tr>`; }).join("");
     return `<div class="card"><h3>${esc(sc.name)} <span class="small">${esc(sc.path)}</span></h3>
+      <div class="small" style="margin-bottom:6px">${sc.files ?? "?"} files to index · ${fmtBytes(sc.bytes||0)} — step 6 estimates how long creating the GraphRAG takes, and lets you create it in batches.</div>
       <div class="chips" style="margin-bottom:8px">${langs}</div>
       <div class="small">Processes &amp; libraries</div><div class="chips" style="margin:4px 0 8px">${procs}</div>
       <div class="small">IDL interfaces</div><div class="chips" style="margin:4px 0 8px">${ifs}</div>
       ${sc.generated?.length ? `<div class="small">${sc.generated.length} generated file(s) detected — indexed as generated, ranked low</div>` : ""}
       ${sc.secret_files ? `<div class="small">${sc.secret_files} secret-store file(s) will never be indexed</div>` : ""}
       <table><tr><th>Folder</th><th>Files</th><th>Role</th></tr>${folders}</table>
-      ${unk ? `<h3 style="font-size:14px;margin-top:14px" class="warn">Unknown file types — what do they contain?</h3>
+      ${unk ? `<h3 style="font-size:14px;margin-top:14px" class="${(sc.unknown_types||[]).length ? "warn" : ""}">${(sc.unknown_types||[]).length ? "Unknown file types — what do they contain?" : "File types answered before"}</h3>
       <table><tr><th>Type</th><th>Kind</th><th>Read as</th></tr>${unk}</table>` : ""}</div>`;
   }).join("");
   document.querySelectorAll("select.role").forEach(s => s.onchange = () => answers[s.dataset.r].roles[s.dataset.f] = s.value);
@@ -450,35 +483,177 @@ $("#reviewNext").onclick = () => {
     if (!t.kind || (t.kind !== "ignore" && !t.parse_as)) missing.push(`${sc.name}: ${e}`); }));
   if (scans.some(sc => !sc.ok)) { $("#reviewErr").textContent = "Fix or remove the repositories with errors first."; return; }
   if (missing.length) { $("#reviewErr").textContent = "Please choose what these file types contain: " + missing.join(", "); return; }
-  finish("review","configure");
+  ow = {}; finish("review","configure");
 };
 
-/* 5 configure */
+/* 5 configure — for a repository set up before, the developer chooses what to overwrite */
+const OW_ITEMS = [   // [key, label, when overwritten, when kept]
+  ["roles", "Folder roles and file types", "replaced with your answers in step 4", "the saved ones are kept"],
+  ["settings", "GraphRAG and query settings", "reset to their defaults (excluded paths, top_k, role weights, …); the components chosen in step 6 stay", "your saved values are kept"],
+  ["instructions", "Copilot instructions", "<code>.github/copilot-instructions.md</code> is regenerated (your own edits to it are lost)", "your current file is kept as it is"],
+  ["skill", "Agent skill", "<code>.github/skills/cross-repo-feature-analysis/</code> is reinstalled (your own edits to it are lost)", "your current copy is kept as it is"]];
+const wasSetUp = name => !!connected(name)?.existing?.config;
+function reviewChanged(name) {
+  const a = answers[name] || {roles:{}, types:{}}, s = saved[name] || {roles:{}, types:{}};
+  return Object.keys(a.roles).some(f => a.roles[f] !== s.roles[f]) ||
+    Object.entries(a.types).some(([e,t]) => !s.types[e] || s.types[e].kind !== t.kind || (s.types[e].parse_as||"") !== (t.parse_as||""));
+}
+function owFor(name) {
+  if (!ow[name]) ow[name] = {roles: reviewChanged(name), settings: false, instructions: true, skill: true};
+  return ow[name];
+}
+const topGlob = (p, sc) => (sc.folders||[]).some(f => f.folder && (p === f.folder + "/**" || p === f.folder));
 function plan() {
   return repos.map(r => { const sc = scans.find(s => s.name === r.name) || {}; const a = answers[r.name] || {roles:{}, types:{}};
-    const roles = (sc.folders||[]).filter(f => f.folder && a.roles[f.folder] !== f.role)
+    const old = wasSetUp(r.name), o = old ? owFor(r.name) : null;
+    let roles = (sc.folders||[]).filter(f => f.folder && a.roles[f.folder] !== (f.auto_role || f.role))
       .map(f => ({path: f.folder + "/**", role: a.roles[f.folder], ...(a.roles[f.folder] === "external" ? {index:"signatures"} : {})}));
-    const types = {}; Object.entries(a.types).forEach(([e,t]) => types[e] = t.kind === "ignore" ? {kind:"ignore"} : t);
-    return {...r, roles, file_types: types}; });
+    roles = roles.concat((sc.saved_structure||[]).filter(e => !topGlob(e.path, sc)));     // deeper entries saved by hand
+    const types = {}; Object.entries(a.types).forEach(([e,t]) => types[e] = t.kind === "ignore" ? {kind:"ignore"} : {kind:t.kind, parse_as:t.parse_as});
+    if (old && !o.roles) {             // keep the saved answers; only newly found file types are added
+      Object.keys(types).forEach(e => { if (a.types[e].saved) delete types[e]; });
+      return {...r, roles: [], file_types: types, reset_settings: o.settings, keep: ["instructions","skill"].filter(k => !o[k])};
+    }
+    return {...r, roles, file_types: types, replace_roles: old, ...(old ? {reset_settings: o.settings, keep: ["instructions","skill"].filter(k => !o[k])} : {})}; });
 }
 function showConfigure() {
-  $("#configSummary").innerHTML = plan().map(r => `<div class="card"><h3>${esc(r.name)}</h3><div class="path">${esc(r.path)}</div>
-    <div class="small" style="margin-top:6px">${Object.keys(r.file_types).length ? "File types: " + Object.entries(r.file_types).map(([e,t]) => esc(e)+" → "+esc(t.kind)+(t.parse_as?" ("+esc(t.parse_as)+")":"")).join(", ") : "No unknown file types"}</div>
-    <div class="small">${r.roles.length ? "Role changes: " + r.roles.map(x => esc(x.path)+" → "+esc(x.role)).join(", ") : "Folder roles as proposed"}</div></div>`).join("");
+  const p = plan(), olds = p.filter(r => wasSetUp(r.name)), gone = dropped();
+  $("#configSummary").innerHTML =
+    (olds.length ? `<div class="notice info"><b>${olds.length === 1 ? "This repository was" : "These repositories were"} set up before.</b> Choose what to overwrite for each one, or for all at once:
+       <button class="link" id="owAll">Overwrite all</button> · <button class="link" id="owNone">Keep all</button>
+       <div class="small" style="margin-top:4px">Always updated: the MCP server code in <code>mcp/</code> and the VS Code configuration <code>.vscode/mcp.json</code> (it holds this computer's paths). Your source code and <code>knowledge/</code> folder are never changed.</div></div>` : "") +
+    p.map(r => { const old = wasSetUp(r.name), o = old ? owFor(r.name) : null;
+      const opts = old ? `<div class="opts" style="margin-top:8px"><div class="small">Tick what to overwrite:</div>` + OW_ITEMS.map(([k, label, overwrite, keep]) =>
+          `<label><input type="checkbox" data-ow="${esc(r.name)}|${k}" ${o[k] ? "checked" : ""}><span><b>${label}</b> — <span class="what">${o[k] ? `<b class="warn">overwrite</b>: ${overwrite}` : `<b class="ok">keep</b>: ${keep}`}</span></span></label>`).join("") +
+          (!o.roles && reviewChanged(r.name) ? `<div class="small warn">Your changes in step 4 are not saved while folder roles and file types are kept.</div>` : "") + `</div>` : "";
+      return `<div class="card"><h3>${esc(r.name)} ${old ? `<span class="st indexed">set up before</span>` : `<span class="st">new</span>`}</h3><div class="path">${esc(r.path)}</div>
+        <div class="small" style="margin-top:6px">${Object.keys(r.file_types).length ? "File types: " + Object.entries(r.file_types).map(([e,t]) => esc(e)+" → "+esc(t.kind)+(t.parse_as?" ("+esc(t.parse_as)+")":"")).join(", ") : old && !o.roles ? "File types: kept as saved" : "No unknown file types"}</div>
+        <div class="small">${r.roles.length ? "Folder roles: " + r.roles.map(x => esc(x.path)+" → "+esc(x.role)).join(", ") : old && !o.roles ? "Folder roles: kept as saved" : "Folder roles as proposed"}</div>${opts}</div>`; }).join("") +
+    (gone.length ? `<div class="notice">Will be disconnected: <b>${gone.map(x => esc(x.name)).join(", ")}</b> (removed in step 3). Its files are left as they are.</div>` : "");
+  document.querySelectorAll("[data-ow]").forEach(c => c.onchange = () => { const [n, k] = c.dataset.ow.split("|"); owFor(n)[k] = c.checked; showConfigure(); });
+  const setAll = v => { olds.forEach(r => OW_ITEMS.forEach(([k]) => owFor(r.name)[k] = v)); showConfigure(); };
+  if ($("#owAll")) { $("#owAll").onclick = () => setAll(true); $("#owNone").onclick = () => setAll(false); }
 }
 $("#configureBtn").onclick = async () => {
   $("#configureBtn").disabled = true;
-  try { await runJob(() => api("/api/configure", {repos: plan()}), $("#configLog")); S = await api("/api/state"); finish("configure","verify"); }
+  try { await runJob(() => api("/api/configure", {repos: plan(), drop: dropped().map(x => x.name)}), $("#configLog")); S = await api("/api/state"); EST = null; finish("configure","verify"); }
   catch (e) { $("#configLog").textContent += "\n" + e.message; }
   $("#configureBtn").disabled = false;
 };
 
-/* 6 verify */
-$("#verifyBtn").onclick = async () => {
-  $("#verifyBtn").disabled = true; $("#verifyResult").innerHTML = "";
+/* 6 create the GraphRAG: estimate → choose components (batches) → build with a progress bar */
+const LARGE = 15 * 60;                 // above this, suggest creating the GraphRAG in batches
+let EST = null, SEL = {}, FRESH = {}, BATCH = 0, estPromise = null;
+const compKey = (repo, c) => repo + "|" + c.path;
+function compSeconds(c, fresh) {
+  const r = EST.rates, cached = fresh ? 0 : c.cached_bytes;
+  return (c.bytes - cached) * (r.parse + r.embed) + cached * r.parse;
+}
+function totals(pick) {             // pick(repo, c) → included?
+  let secs = EST.rates.model_load || 0, comps = 0, files = 0, bytes = 0;
+  EST.repos.forEach(rp => { let incl = 0;
+    rp.components.forEach(c => { if (!pick(rp.name, c)) return;
+      secs += compSeconds(c, FRESH[rp.name]); incl += c.bytes; if (!c.always) comps++; files += c.files; bytes += c.bytes; });
+    secs += incl * EST.rates.parse; });                       // linking pass: parsed again, vectors reused
+  return {secs, comps, files, bytes};
+}
+const selected = (repo, c) => c.always || !!SEL[compKey(repo, c)];
+function showVerify(force) {
+  if (EST && !force) { if (!$("#estBox").innerHTML) renderEstimate(); return Promise.resolve(); }
+  if (!estPromise) estPromise = runEstimate().finally(() => { estPromise = null; });
+  return estPromise;
+}
+async function runEstimate() {
+  $("#estBox").innerHTML = status(false, "Estimating how long creating the GraphRAG takes on this computer… (lists the files, then parses and embeds a small sample with the real model)");
   try {
-    const res = await runJob(() => api("/api/verify", {}), $("#verifyLog")); done.add("verify");
+    EST = await runJob(() => api("/api/estimate", {}), $("#estLog"));
+    SEL = {}; EST.repos.forEach(rp => rp.components.forEach(c => SEL[compKey(rp.name, c)] = !c.deferred));
+    $("#estLog").style.display = "none"; renderEstimate();
+  } catch (e) { $("#estBox").innerHTML = status(false, `<span class="bad">Estimate failed: ${esc(e.message)}</span>`) +
+      `<div class="row"><button id="estRetry">Try again</button><button class="primary" id="estSkip">Create without an estimate</button></div>`;
+    $("#estRetry").onclick = () => showVerify(true); $("#estSkip").onclick = () => createGraph({}); }
+}
+function suggestBatch() {           // what is already in the GraphRAG stays; then the cheapest new components up to LARGE
+  let budget = LARGE - (EST.rates.model_load || 0);
+  const pool = [];
+  EST.repos.forEach(rp => rp.components.forEach(c => { if (c.always) return;
+    const s = compSeconds(c, FRESH[rp.name]); const keep = c.state === "indexed" && !FRESH[rp.name] && !c.deferred;
+    SEL[compKey(rp.name, c)] = keep; if (keep) budget -= s; else pool.push([s, rp.name, c]); }));
+  pool.sort((a, b) => a[0] - b[0]).forEach(([s, rn, c]) => { if (s <= budget) { SEL[compKey(rn, c)] = true; budget -= s; } });
+}
+function renderEstimate() {
+  const all = totals(() => true), sel = totals(selected), big = all.secs > LARGE;
+  const nComps = EST.repos.reduce((n, rp) => n + rp.components.filter(c => !c.always).length, 0);
+  const left = EST.repos.flatMap(rp => rp.components.filter(c => !c.always && !selected(rp.name, c)));
+  const stateChip = (rp, c) => !selected(rp.name, c) ? `<span class="st later">left for later</span>`
+    : FRESH[rp.name] ? `<span class="st">rebuilt from scratch</span>`
+    : c.state === "indexed" ? `<span class="st indexed">in GraphRAG</span>` : c.state === "partly" ? `<span class="st">partly (changed)</span>` : `<span class="st">new</span>`;
+  $("#estBox").innerHTML = (big
+      ? `<div class="notice"><b>Creating the whole GraphRAG takes ${fmtDur(all.secs)} on this computer</b> (${all.files.toLocaleString()} files, ${fmtBytes(all.bytes)}, ${nComps} components).
+          You can create it all now, or start with fewer components as <b>batch ${BATCH + 1}</b> and add the rest in later batches.
+          Copilot and the query field work with whatever has been created so far.
+          <div class="row" style="margin-top:8px"><button class="link" id="estSuggest">Suggest a first batch (up to ${fmtDur(LARGE)})</button> · <button class="link" id="estAll">Select all</button> · <button class="link" id="estNone">Clear the selection</button></div></div>`
+      : `<div class="notice info">Creating the GraphRAG takes <b>${fmtDur(all.secs)}</b> on this computer (${all.files.toLocaleString()} files, ${fmtBytes(all.bytes)}). You can also leave components for a later batch.</div>`) +
+    EST.repos.map(rp => `<div class="card"><h3>${esc(rp.name)} <span class="small">${rp.files.toLocaleString()} files · ${fmtBytes(rp.bytes)} · ${rp.graph_exists ? "GraphRAG exists" : "no GraphRAG yet"}</span></h3>
+      <div class="comps"><table><tr><th></th><th>Component</th><th>Files</th><th>Size</th><th>Status</th><th>Time</th></tr>
+      ${rp.components.map(c => `<tr><td><input type="checkbox" data-comp="${esc(compKey(rp.name, c))}" ${selected(rp.name, c) ? "checked" : ""} ${c.always ? "disabled title='Always included'" : ""}></td>
+        <td><code>${esc(c.label)}</code></td><td>${c.files.toLocaleString()}</td><td>${fmtBytes(c.bytes)}</td><td>${stateChip(rp, c)}</td><td>${fmtDur(compSeconds(c, FRESH[rp.name]))}</td></tr>`).join("")}
+      </table></div>
+      ${rp.graph_exists ? `<div class="opts"><label><input type="checkbox" data-fresh="${esc(rp.name)}" ${FRESH[rp.name] ? "checked" : ""}><span><b>Start this repository from scratch</b> — <span class="what">${FRESH[rp.name] ? `<b class="warn">overwrite</b>: its stored graph and cached vectors are removed and everything is embedded again` : `<b class="ok">keep</b>: the existing GraphRAG is updated; unchanged code is reused`}</span></span></label></div>` : ""}</div>`).join("") +
+    `<div class="row" style="margin-top:6px"><button class="primary" id="verifyBtn" ${sel.comps || !nComps ? "" : "disabled"}>${left.length ? `Create batch ${BATCH + 1}: ${sel.comps} of ${nComps} components — ${fmtDur(sel.secs)}` : `Yes, create the GraphRAG — ${fmtDur(sel.secs)}`}</button>
+       ${left.length && big ? `<button id="verifyAll">Create all — ${fmtDur(all.secs)}</button>` : ""}<span class="spacer"></span><button class="link" id="estAgain">Estimate again</button></div>
+     ${left.length ? `<div class="small" style="margin-top:6px">${left.length} component(s) left for later — not indexed until you choose them here again.</div>` : ""}`;
+  document.querySelectorAll("[data-comp]").forEach(c => c.onchange = () => { SEL[c.dataset.comp] = c.checked; renderEstimate(); });
+  document.querySelectorAll("[data-fresh]").forEach(c => c.onchange = () => { FRESH[c.dataset.fresh] = c.checked; renderEstimate(); });
+  if ($("#estSuggest")) { $("#estSuggest").onclick = () => { suggestBatch(); renderEstimate(); };
+    $("#estAll").onclick = () => { Object.keys(SEL).forEach(k => SEL[k] = true); renderEstimate(); };
+    $("#estNone").onclick = () => { Object.keys(SEL).forEach(k => SEL[k] = false); renderEstimate(); }; }
+  $("#estAgain").onclick = () => showVerify(true);
+  $("#verifyBtn").onclick = () => createGraph(selectionBody());
+  if ($("#verifyAll")) $("#verifyAll").onclick = () => { Object.keys(SEL).forEach(k => SEL[k] = true); createGraph(selectionBody()); };
+}
+function selectionBody() {
+  return {deferred: Object.fromEntries(EST.repos.map(rp => [rp.name, rp.components.filter(c => !selected(rp.name, c)).map(c => c.path)])),
+          fresh: Object.keys(FRESH).filter(n => FRESH[n])};
+}
+const STAGE = {read: "reading files", parse: "parsing", embed: "embedding", write: "saving"};
+function progressView(el, expected) {   // → onProgress callback that draws the bar with the time left
+  const t0 = Date.now();
+  el.innerHTML = `<div class="prog"><div class="row"><b>Creating the GraphRAG</b><span class="spacer"></span><span class="small" id="${el.id}Pct">starting…</span></div>
+    <div class="pbar"><i id="${el.id}Bar"></i></div><div class="small" id="${el.id}Txt">Loading the model…</div></div>`;
+  return p => {
+    const pct = Math.round(p.overall * 100), elapsed = (Date.now() - t0) / 1000;
+    const leftAll = p.overall > 0.03 ? elapsed / p.overall * (1 - p.overall) : (expected ? Math.max(expected - elapsed, 0) : null);
+    $(`#${el.id}Bar`).style.width = pct + "%";
+    $(`#${el.id}Pct`).textContent = pct + "%" + (leftAll != null && p.overall < 1 ? " · " + fmtDur(leftAll) + " left" : "");
+    $(`#${el.id}Txt`).textContent = `${p.phase === "linking" ? "Linking" : "Building"} ${p.repo}: ${STAGE[p.stage] || p.stage}` +
+      (p.total > 1 ? ` ${p.done.toLocaleString()} / ${p.total.toLocaleString()} ${p.stage === "embed" ? "units" : "files"}` : "") +
+      (p.stage_seconds_left > 5 ? ` — this stage: ${fmtDur(p.stage_seconds_left)} left` : "");
+  };
+}
+async function createGraph(body) {
+  document.querySelectorAll("#estBox button, #estBox input").forEach(b => b.disabled = true);
+  $("#verifyResult").innerHTML = ""; $("#batchBox").innerHTML = "";
+  const expected = EST ? totals(selected).secs : null;
+  try {
+    const res = await runJob(() => api("/api/verify", body), $("#verifyLog"), progressView($("#progBox"), expected)); done.add("verify");
+    BATCH++; $("#progBox").querySelector(".pbar>i").style.width = "100%"; $("#progBoxPct").textContent = "100% · done";
     S = await api("/api/state"); fillRepoSelect(); kgLoaded = false; nav();
+    const later = EST ? EST.repos.flatMap(rp => rp.components.filter(c => !selected(rp.name, c)).map(c => ({repo: rp.name, c}))) : [];
+    $("#estBox").innerHTML = status(true, `GraphRAG ${later.length ? "batch " + BATCH : ""} created.`) +
+      `<div class="row" style="margin:-6px 0 8px"><button class="link" id="estShow">Show the components and estimate again</button></div>`;
+    $("#estShow").onclick = () => showVerify(true);
+    if (later.length) {
+      const secs = later.reduce((s, x) => s + compSeconds(x.c, false), 0);
+      $("#batchBox").innerHTML = `<div class="notice"><b>Batch ${BATCH} is done.</b> ${later.length} component(s) are still left for later (${fmtDur(secs)}): ${later.slice(0, 8).map(x => `<code>${esc(x.repo)}: ${esc(x.c.label)}</code>`).join(", ")}${later.length > 8 ? " …" : ""}.
+        Create the next batch now?
+        <div class="row" style="margin-top:8px"><button class="primary" id="bAll">Create all remaining — ${fmtDur(secs)}</button><button id="bChoose">Choose the next batch</button><button class="link" id="bStop">Stop here — add them later</button></div></div>`;
+      $("#bAll").onclick = () => { Object.keys(SEL).forEach(k => SEL[k] = true); FRESH = {};
+        createGraph({deferred: Object.fromEntries(EST.repos.map(rp => [rp.name, []])), fresh: []}); };
+      $("#bChoose").onclick = async () => { FRESH = {}; $("#batchBox").innerHTML = ""; await showVerify(true); $("#estBox").scrollIntoView(); };
+      $("#bStop").onclick = () => { $("#batchBox").innerHTML = `<div class="small">The remaining components stay out of the GraphRAG until you choose them in step 6 (Create GraphRAG).</div>`; };
+    }
+    FRESH = {};
     const rows = res.repos.map(r => `<tr><td><b>${esc(r.name)}</b></td><td>${r.files}</td><td>${r.units}</td><td>${r.links}</td>
       <td>${r.interfaces_defined.map(esc).join(", ") || "—"}</td><td>${r.unclassified.length ? `<span class="warn">${r.unclassified.map(esc).join(", ")}</span>` : "—"}</td></tr>`).join("");
     const ifs = res.interfaces.map(i => `<div class="iface"><b>${esc(i.interface)}</b> <span class="small">defined in ${esc(i.defined_in)} · ${i.operations.map(esc).join(", ")}</span>
@@ -496,9 +671,9 @@ $("#verifyBtn").onclick = async () => {
     $("#toQueries").onclick = () => { go("queries"); $("#qtext").focus(); };
     document.querySelectorAll("[data-c]").forEach(b => b.onclick = () => { navigator.clipboard?.writeText(b.dataset.c); b.textContent = "Copied"; });
     $("#quit").onclick = async () => { await api("/api/quit", {}); document.body.innerHTML = "<p style='padding:40px'>Setup closed. You can close this tab.</p>"; };
-  } catch (e) { $("#verifyLog").textContent += "\n" + e.message; }
-  $("#verifyBtn").disabled = false;
-};
+  } catch (e) { $("#verifyLog").textContent += "\n" + e.message; renderEstimateIfAny(); }
+}
+function renderEstimateIfAny() { if (EST) renderEstimate(); }
 
 /* queries — always available once the GraphRAG exists */
 function fillRepoSelect() {
@@ -727,7 +902,7 @@ $("#setSave").onclick = async () => {
          <button class="primary" id="setRebuild">Rebuild GraphRAG now</button></div>` : "");
     if ($("#setRebuild")) $("#setRebuild").onclick = async () => {
       $("#setRebuild").disabled = true;
-      try { await runJob(() => api("/api/verify", {}), $("#setLog")); S = await api("/api/state"); kgLoaded = false;
+      try { await runJob(() => api("/api/verify", {}), $("#setLog"), progressView($("#setProg"))); S = await api("/api/state"); kgLoaded = false; EST = null;
         $("#setResult").innerHTML = `<div class="status"><b class="ok">✓</b>GraphRAG rebuilt with the new settings. Reload VS Code so Copilot uses it.</div>`; }
       catch (e) { $("#setResult").innerHTML += `<p class="bad">${esc(e.message)}</p>`; }
     };

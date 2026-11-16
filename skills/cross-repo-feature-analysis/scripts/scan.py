@@ -168,13 +168,28 @@ def analyze(name: str, root: Path) -> dict:
     out["idl_files"] = sum(1 for _, _, l in files if l == "idl")
     out["interfaces"] = ifaces
     out["generated"] = [{"file": f, "reason": r} for f, r in sorted(st.generated.items())]
+    auto = resolve(root, rels, []) if cfg.structure else st     # roles without the saved answers
     by_top = collections.defaultdict(collections.Counter)
+    auto_top = collections.defaultdict(collections.Counter)
     for rel in rels:
         parts = PurePosixPath(rel).parts
-        by_top[parts[0] if len(parts) > 1 else ""][st.roles.get(rel, "implementation")] += 1
+        top = parts[0] if len(parts) > 1 else ""
+        by_top[top][st.roles.get(rel, "implementation")] += 1
+        auto_top[top][auto.roles.get(rel, "implementation")] += 1
     out["folders"] = [{"folder": top, "role": roles.most_common(1)[0][0], "files": sum(roles.values()),
+                       "auto_role": auto_top[top].most_common(1)[0][0],
                        "mixed": dict(roles) if len(roles) > 1 else {}}
                       for top, roles in sorted(by_top.items())]
+    size = 0
+    for _, ab, _ in files:
+        try:
+            size += ab.stat().st_size
+        except OSError:
+            pass
+    out["files"], out["bytes"] = len(files), size
+    out["saved_structure"] = cfg.structure
+    out["saved_types"] = [{"ext": ext, "kind": (ft or {}).get("kind", ""), "parse_as": (ft or {}).get("parse_as", "")}
+                          for ext, ft in sorted((cfg_now.get("file_types") or {}).items())]
     out["unknown_types"] = []
     for ext, samples in sorted(unknown.items()):
         what, suggestion = _hint(root / samples[0])

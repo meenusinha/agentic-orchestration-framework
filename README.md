@@ -23,6 +23,8 @@ You can also run the same searches yourself in a local web page, without Copilot
 1. [How it works](#how-it-works)
 2. [Requirements](#requirements)
 3. [Install and set up](#install-and-set-up)
+   - [Large repositories: time estimate, batches, progress](#large-repositories-time-estimate-batches-progress)
+   - [Setting up again: what is kept and what is overwritten](#setting-up-again-what-is-kept-and-what-is-overwritten)
 4. [Use it in VS Code with Copilot](#use-it-in-vs-code-with-copilot)
 5. [Search without Copilot: queries and the knowledge graph](#search-without-copilot)
 6. [What gets indexed](#what-gets-indexed)
@@ -95,16 +97,65 @@ browser. It runs on `127.0.0.1` only and is protected by a one-time token. Six s
 
 | Step | What you do |
 |---|---|
-| **1. Install** | Click **Install**. The hash-locked packages go into `.venv`; nothing is installed into your system Python |
-| **2. Model** | Nothing to do: the included model is checked file by file against its pinned fingerprints (see [Model integrity](#model-integrity-hash-pinning)) and the step completes by itself. Only if `models/` is missing does it ask you to point to another copy |
-| **3. Repositories** | Add each repository to connect, at least two. Either type its folder path (or **Choose folder…**) for a repository you've already cloned, or **Clone from Git**: enter the URL and branch and choose the folder to clone into. If that folder already holds a clone of the same repository, it's updated and switched to the branch instead |
-| **4. Review** | Check what the scan found: languages, processes and libraries, IDL interfaces and the role of each folder. If a file type is unknown, say what it contains (implementation, interface, configuration, …) and which language to read it as |
-| **5. Configure** | Click **Configure**. This writes the VS Code configuration into each repository (see [Files the framework adds](#files-the-framework-adds-to-your-repositories)) |
-| **6. Create GraphRAG** | Click **Yes, create the GraphRAG**. The first build takes a few minutes per large repository. The page then shows which processes serve and call each IDL interface |
+| **1. Install** | Click **Install**. The hash-locked packages go into `.venv`; nothing is installed into your system Python. If they're already installed, choose **Keep and continue** or **Reinstall all packages** |
+| **2. Model** | Nothing to do: the included model is checked file by file against its pinned fingerprints (see [Model integrity](#model-integrity-hash-pinning)). Keep it, or type another folder holding the approved model to replace it. Only if `models/` is missing does it ask you to point to another copy |
+| **3. Repositories** | Add each repository to connect, at least two. Either type its folder path (or **Choose folder…**) for a repository you've already cloned, or **Clone from Git**: enter the URL and branch and choose the folder to clone into. If that folder already holds a clone of the same repository, it's updated and switched to the branch instead. Repositories connected before are listed; removing one disconnects it at step 5 (its files stay) |
+| **4. Review** | Check what the scan found: languages, size, processes and libraries, IDL interfaces and the role of each folder. If a file type is unknown, say what it contains (implementation, interface, configuration, …) and which language to read it as. Answers saved by an earlier setup are shown and can be changed |
+| **5. Configure** | Click **Configure**. This writes the VS Code configuration into each repository (see [Files the framework adds](#files-the-framework-adds-to-your-repositories)). For a repository set up before, you first choose what to overwrite (see [Setting up again](#setting-up-again-what-is-kept-and-what-is-overwritten)) |
+| **6. Create GraphRAG** | The page first estimates how long it takes on this computer, per component. Create everything, or choose fewer components as a first batch and add the rest later (see [Large repositories](#large-repositories-time-estimate-batches-progress)). A progress bar shows how far it is and the time left. The page then shows which processes serve and call each IDL interface |
 
 When setup is done, the page stays open for searching (see
 [Search without Copilot](#search-without-copilot)). Running `python3 setup_gui.py` again
 later opens straight on the search page.
+
+### Large repositories: time estimate, batches, progress
+
+Creating the GraphRAG for a very large repository can take hours, almost all of it spent
+turning code into vectors (embedding) on the CPU. Step 6 therefore starts with an
+estimate and lets you build in batches:
+
+1. **Components.** Each repository is divided into components: its top-level folders. A
+   folder that holds most of a large repository (for example one huge `src/`) is split into
+   its sub-folders. Top-level files, such as the build files that tell which processes
+   exist, are always included.
+2. **Estimate.** The page lists every file that would be indexed, checks which are already
+   in the GraphRAG with unchanged content (their vectors are reused), and parses and
+   embeds a small sample of your real code with the real model on this computer. From that
+   it shows the time per component, per repository and in total. Nothing is written while
+   estimating.
+3. **Choose.** If everything takes more than 15 minutes, the page suggests a batch:
+   **Create all**, or tick fewer components (**Suggest a first batch** picks what fits in
+   about 15 minutes) and click **Create batch 1**. Unticked components are *left for later*:
+   they are saved in the repository's `deferred` setting, and every MCP server, the query
+   field and the router leave them out the same way.
+4. **Progress.** While building, a progress bar shows the repository, the stage (reading,
+   parsing, embedding, saving, then linking across repositories), the units done, and the
+   time left.
+5. **Next batch.** When a batch is done, the page lists what's still left and asks:
+   **Create all remaining**, **Choose the next batch**, or **Stop here — add them later**.
+   Copilot and the query field already work with what has been built. Each new batch only
+   embeds the new components; everything built before is reused.
+
+You can come back to step 6 at any time to add the remaining components, or to leave some
+out again.
+
+### Setting up again: what is kept and what is overwritten
+
+You can run the setup again for the same repositories at any time. Nothing is
+overwritten without asking:
+
+| Step | Already done before | Your choice |
+|---|---|---|
+| 1. Install | Packages installed | **Keep and continue**, or **Reinstall all packages** (hash-verified again) |
+| 2. Model | Model verified | **Keep and continue**, or type another folder to replace it (checked first) |
+| 3. Repositories | Repositories connected | Keep them, add more, or remove one; a removed repository is disconnected at step 5 and its files are left as they are |
+| 4. Review | Folder roles and file-type answers saved | Shown as *saved* / *answered before*, and can be changed |
+| 5. Configure | Settings and generated files in the repository | Per repository, or for all at once (**Overwrite all** / **Keep all**): **folder roles and file types** (replace with step 4's answers, or keep), **GraphRAG and query settings** (reset to defaults, or keep), **Copilot instructions** (regenerate, or keep your edited file), **agent skill** (reinstall, or keep) |
+| 6. Create GraphRAG | A GraphRAG exists | Per repository: **update** it (the default: unchanged code is reused), or **start from scratch** (its stored graph and cached vectors are removed and everything is embedded again) |
+
+Always updated, because they must match this framework version and this computer: the
+MCP server code in each repository's `mcp/` folder and the VS Code configuration
+`.vscode/mcp.json`. Your source code and your `knowledge/` folder are never changed.
 
 ---
 
@@ -172,6 +223,7 @@ fills in the defaults.
 | **GraphRAG creation** (per repository) | Folders to index (`src_path`) | `.` (the whole repository) | paths |
 | | Extra documentation folders (`knowledge_path`) | `./knowledge` | paths |
 | | Exclude (`exclude`) | none | globs, e.g. `build/**`, `*.generated.c` |
+| | Components left for a later batch (`deferred`) | none (everything) | folders; filled in by step 6 |
 | | Extra file extensions indexed as text (`extra_extensions`) | none | e.g. `.tmpl` |
 | | Maximum file size (`max_file_kb`) | 2000 KB | 10–50000 |
 | | Embedding batch size (`embed_batch_size`) | 64 | 1–512 |
@@ -211,9 +263,10 @@ Every path can be typed or pasted, as well as chosen with **Browse…**:
 |---|---|
 | Code or docs changed | Nothing. The servers check for changes at most once a minute and update the graph, re-embedding only what changed |
 | Add or remove a repository | Run `python3 setup_gui.py`, go to **Repositories**, then **Review**, **Configure** and **Create GraphRAG**. Reload VS Code afterwards |
-| Change a folder role or file type | Same as above; the graph rebuilds |
+| Change a folder role or file type | Same as above, and choose to overwrite *folder roles and file types* in step 5; the graph rebuilds |
+| Add the components left for later | Step 6 (**Create GraphRAG**): tick them, or **Create all remaining** |
 | Change creation or query settings | **Settings** page (see [Settings](#settings)) |
-| Force a full rebuild | Delete `<repo>/.rag_index/`; it's rebuilt on the next start |
+| Force a full rebuild | Step 6: tick **Start this repository from scratch**. Or delete `<repo>/.rag_index/` while VS Code is closed; it's rebuilt on the next start |
 | Remove all derived data | Delete `<repo>/.rag_index/` in each repository and `results/` in the framework folder |
 | Logs | `~/.agentic-orchestration/logs/` (private; code text is hidden unless `log_content: true` in `orchestrator/mcp/config.yaml`) |
 
@@ -247,6 +300,13 @@ the framework's virtual-environment Python (`.venv/bin/python`; on Windows
     --repo repo-a=/path/to/repo-a --src repo-a=. \
     --repo repo-b=/path/to/repo-b --src repo-b=. \
     --file-type 'repo-b=.xidl:interface:idl' --role 'repo-a=third_party/**:external:signatures'
+
+# Configure again, choosing what to overwrite for repositories set up before:
+#   --replace-roles NAME       roles and file types become exactly the --role/--file-type given
+#   --reset-settings NAME      GraphRAG and query settings back to their defaults
+#   --keep NAME=instructions   keep the edited .github/copilot-instructions.md
+#   --keep NAME=skill          keep the installed agent skill
+#   --drop NAME                disconnect a repository (its files are left as they are)
 
 # Ask a cross-repository question from the terminal (saves a new report in results/)
 .venv/bin/python test_mcp.py "what would it take to add a password policy hint to login?"
@@ -328,6 +388,8 @@ For details:
 | Cloning a private repository fails | Set up Git access first (SSH key or credential manager); the setup page never asks for passwords |
 | A repository returns nothing relevant | In **Review**, check for unknown file types set to *ignore* and for folders with the wrong role |
 | The first search is slow | Expected — the first search loads the model and graphs; later searches take well under a second |
+| Creating the GraphRAG would take hours | Create it in batches (step 6): start with the components you need first, and add the rest later. Excluding generated or vendored folders (**Settings → Exclude**) also helps |
+| A component is missing from search results | It may be *left for later*: tick it in step 6, or remove it from **Settings → Components left for a later batch** |
 
 ---
 

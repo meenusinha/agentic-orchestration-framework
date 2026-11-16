@@ -140,8 +140,12 @@ data disclosure) and to point them out instead. This lowers the risk; it can't e
 | Script injection, framing | Strict Content-Security-Policy (no external resources, no `eval`, `frame-ancestors 'none'`), `X-Content-Type-Options: nosniff`, no caching; all repository text is HTML-escaped |
 | Reading files outside the framework | Saved results are served by name only, from `results/` (path traversal refused); the knowledge-graph view reads graph databases read-only (`mode=ro`), with validated ids and configured repos only |
 | Runaway or overlapping actions | One job at a time; no shell is ever used |
+| Unintended overwriting when setting up again | Nothing an earlier setup left is overwritten without a choice on the page: reinstalling packages, replacing the model folder, replacing folder roles and file types, resetting settings, regenerating Copilot instructions, reinstalling the agent skill and starting a GraphRAG from scratch are each opt-in. Source code and `knowledge/` are never changed; disconnecting a repository leaves its files as they are |
+| Components chosen for a batch | Folder names are validated as paths inside the repository (no absolute paths, no `..`) before they are written to the `deferred` setting; glob characters in folder names are escaped |
 
-The page runs only while the setup GUI is open, and **Close** stops it.
+The page runs only while the setup GUI is open, and **Close** stops it. The time estimate
+in step 6 only reads: it lists files, compares them with the stored graph opened read-only,
+and embeds a small sample locally with the approved model, writing nothing.
 
 ### 2.9 Cloning from the GUI
 
@@ -246,6 +250,7 @@ To measure that nothing leaves the machine, use the audit-hook method in
 The self-test covers, among others: the token, Host and JSON checks, refusing a download
 request and unusable or tampered models, refusing `ext::` URLs, option-like values and paths in
 folder names, never overwriting an existing folder, path traversal in the results viewer,
+components outside the repository refused, generated files kept or overwritten as chosen,
 invalid ids in the graph view, and private permissions on saved reports. It builds its two
 sample repositories locally from `tests/fixtures/`. The MCP smoke test (`tests/smoke_test.py`)
 checks that the fake credentials planted in those fixtures are redacted.

@@ -87,6 +87,7 @@ def check(name, ok, detail=""):
 class GUI:
     def __init__(self, url):
         self.base, self.tok = url.split("/#t=")[0], url.split("#t=")[1]
+        self.progress = []                       # progress-bar events seen by the last job
 
     def call(self, path, body=None, token=True, ctype="application/json", host=None):
         headers = {"Content-Type": ctype}
@@ -110,15 +111,47 @@ class GUI:
         if code != 200:
             return False, [j.get("error", str(code))], None
         jid, since, lines = j["job"], 0, []
+        self.progress = []
         while True:
             _, s = self.call(f"/api/job/{jid}?since={since}")
             since = s["next"]
+            if s.get("progress") and s["progress"] not in self.progress:
+                self.progress.append(s["progress"])
             for l in s["lines"]:
                 lines.append(l)
                 print("      | " + l[:150], flush=True)
             if s["done"]:
                 return s["ok"], lines, s["result"]
-            time.sleep(1)
+            time.sleep(0.3)
+
+
+def read_yaml(path) -> dict:
+    """A YAML file, read with the framework's virtual environment (this test runs on any
+    Python, which may not have PyYAML)."""
+    py = FW / ".venv" / ("Scripts/python.exe" if os.name == "nt" else "bin/python")
+    r = subprocess.run([str(py), "-c", "import json, sys, yaml; print(json.dumps(yaml.safe_load("
+                        "open(sys.argv[1], encoding='utf-8').read()) or {}))", str(path)],
+                       capture_output=True, text=True, encoding="utf-8",
+                       env={**os.environ, "PYTHONUTF8": "1", "PYTHONPATH": ""})
+    return json.loads(r.stdout or "{}")
+
+
+def check_components():
+    """Grouping into components (standard library only, tested in-process)."""
+    sys.path.insert(0, str(FW / "repo-agent" / "mcp"))
+    from codegraph import components as C
+    files = [(f"src/mod{i % 6}/f{i}.c", 1000) for i in range(900)] + \
+            [(f"docs/d{i}.md", 500) for i in range(60)] + [("Makefile", 200), ("src/main.c", 300)]
+    comps = {c.path: c for c in C.group(files)}
+    check("components: a folder holding most of a large repository is split into its sub-folders",
+          "src/mod0" in comps and "src" not in comps and "docs" in comps, ", ".join(sorted(comps)[:5]))
+    check("components: top-level files and loose files of a split folder are always included",
+          sorted(r for r, _ in comps[C.ALWAYS].files) == ["Makefile", "src/main.c"])
+    small = {c.path for c in C.group([("a/x.c", 1), ("b/y.c", 1), ("README.md", 1)])}
+    check("components: a small repository is grouped by top-level folder", small == {"a", "b", C.ALWAYS}, str(small))
+    odd = "we[ir]d*"
+    check("components: folder names with glob characters round-trip through the setting",
+          C.from_setting(C.to_setting(odd)) == odd and C.to_setting(odd) != odd)
 
 
 def make_foreign_pythonpath() -> str:
@@ -368,8 +401,50 @@ def _run(a):
         code, q = g.call("/api/query", {"mode": "search", "text": "x"})
         check("queries refused before the GraphRAG exists", code == 409)
 
-        print("\n9. Create GraphRAG", flush=True)
-        ok, lines, v = g.job("/api/verify", {})
+        print("\n9. Estimate, then create the GraphRAG in two batches", flush=True)
+        check_components()
+        ok, lines, est = g.job("/api/estimate", {})
+        reps = {r["name"]: r for r in (est or {}).get("repos", [])}
+        comps = {n: {c["path"]: c for c in r["components"]} for n, r in reps.items()}
+        rates = (est or {}).get("rates", {})
+        check("estimate: every repository listed with its components, sizes and status",
+              ok and set(reps) == {"sample-server", "sample-client"} and "src" in comps.get("sample-server", {})
+              and ".github" not in comps.get("sample-server", {})          # the installed skill is never indexed
+              and all(c["files"] > 0 and c["bytes"] > 0 and c["state"] == "new" for c in comps["sample-server"].values()),
+              ", ".join(sorted(comps.get("sample-server", {}))))
+        check("estimate: speed measured on this computer with the real model (parse + embed per byte)",
+              rates.get("embed", 0) > 0 and rates.get("parse", 0) > 0 and rates.get("sample_files", 0) > 0
+              and rates.get("model_load", 0) > 0,
+              f"{rates.get('sample_files')} files, {rates.get('sample_units')} units, "
+              f"embed {rates.get('embed', 0) * 1e6:.0f} µs/byte, model load {rates.get('model_load', 0):.1f}s")
+        later = {"sample-server": ["docs", "third_party"], "sample-client": ["docs"]}
+        code, bad = g.call("/api/verify", {"deferred": {"sample-server": ["../outside"]}})
+        check("batches: a component outside the repository is refused", code == 400, bad.get("error", "")[:80])
+        ok, lines, v = g.job("/api/verify", {"deferred": later})
+        bars = g.progress
+        check("batch 1 created (docs/ and third_party/ left for later)", ok and g.call("/api/state")[1].get("graph_ready"),
+              lines[-1] if lines else "")
+        check("progress bar: stages and overall progress reported while building",
+              bars and {"read", "parse", "embed", "write"} >= {b["stage"] for b in bars} and
+              any(b["stage"] == "embed" for b in bars) and bars[-1]["overall"] >= 0.9 and
+              all(0 <= b["overall"] <= 1 for b in bars), f"{len(bars)} updates, last {bars[-1] if bars else None}")
+        srv_cfg = read_yaml(Path(res["repos"][0]) / "mcp" / "config.yaml")
+        check("batches: the components left for later are saved in the repository's settings",
+              srv_cfg.get("deferred") == ["docs", "third_party"], str(srv_cfg.get("deferred")))
+        tree = [c["name"] for c in g.call("/api/graph/children?repo=sample-server&node=")[1].get("children", [])]
+        check("batch 1 holds only the chosen components", "src/" in tree and "docs/" not in tree and "third_party/" not in tree,
+              ", ".join(tree))
+        ok, lines, est2 = g.job("/api/estimate", {})
+        c2 = {c["path"]: c for r in (est2 or {}).get("repos", []) if r["name"] == "sample-server" for c in r["components"]}
+        check("estimate after batch 1: built components are in the GraphRAG, the others left for later",
+              ok and c2.get("src", {}).get("state") == "indexed" and c2.get("src", {}).get("cached_bytes") == c2.get("src", {}).get("bytes")
+              and c2.get("docs", {}).get("deferred") and c2.get("docs", {}).get("state") == "new",
+              f"src {c2.get('src', {}).get('state')}, docs {c2.get('docs', {}).get('state')}")
+        ok, lines, v = g.job("/api/verify", {"deferred": {"sample-server": [], "sample-client": []}})
+        tree = [c["name"] for c in g.call("/api/graph/children?repo=sample-server&node=")[1].get("children", [])]
+        check("batch 2: the remaining components added", ok and "docs/" in tree and "third_party/" in tree, ", ".join(tree))
+        check("batch 2 re-embeds only the new components (vectors of batch 1 reused)",
+              any("reused" in l for l in lines), next((l for l in lines if "reused" in l), "")[-90:])
         check("GraphRAG created", ok and g.call("/api/state")[1].get("graph_ready"), lines[-1] if lines else "")
         ifs = {i["interface"]: i for i in (v or {}).get("interfaces", [])}
         ps = ifs.get("Auth::IPasswordService", {})
@@ -495,7 +570,67 @@ def _run(a):
         st = g.call("/api/state")[1]
         check("back to the included model", ok and st.get("model_ok") and not st.get("model_custom"))
 
-        print("\n13. Restart: the GUI opens on the queries", flush=True)
+        print("\n13. Set up again: choose what to overwrite", flush=True)
+        st = g.call("/api/state")[1]
+        ex = {r["name"]: r.get("existing", {}) for r in st.get("repos", [])}
+        check("state reports what an earlier setup left (config, instructions, skill, GraphRAG)",
+              all(ex.get(n) == {"config": True, "instructions": True, "skill": True, "graph": True}
+                  for n in ("sample-server", "sample-client")), str(ex.get("sample-client")))
+        srv_path, cli_path = Path(res["repos"][0]), Path(res["repos"][1])
+        instr = cli_path / ".github" / "copilot-instructions.md"
+        skill_md = cli_path / ".github" / "skills" / "cross-repo-feature-analysis" / "SKILL.md"
+        instr.write_text(instr.read_text(encoding="utf-8") + "\nMY OWN NOTE\n", encoding="utf-8")
+        skill_md.write_text(skill_md.read_text(encoding="utf-8") + "\nMY SKILL EDIT\n", encoding="utf-8")
+        g.call("/api/settings", {"repos": {"sample-server": {"top_k": 3, "deferred": ["docs"]}}})
+        code, sc = g.call("/api/scan", {"repos": [{"path": p} for p in res["repos"]]})
+        by = {s["name"]: s for s in sc.get("repos", [])}
+        saved_types = {u["ext"] for s in by.values() for u in s.get("saved_types", [])}
+        check("review shows the answers saved before, and the automatic folder roles",
+              {".xidl", ".xcfg"} <= saved_types and all("auto_role" in f for f in by["sample-server"]["folders"]),
+              ", ".join(sorted(saved_types)))
+        extra = pg_dir / "extra-repo"
+        (extra / "lib").mkdir(parents=True, exist_ok=True)
+        (extra / "lib" / "helper.py").write_text("def helper():\n    return 1\n", encoding="utf-8")
+        keep_plan = [
+            {"name": "sample-server", "path": str(srv_path), "roles": [{"path": "docs/**", "role": "example"}],
+             "file_types": {u["ext"]: {"kind": u["kind"], "parse_as": u["parse_as"]} for u in by["sample-server"]["saved_types"]},
+             "replace_roles": True, "reset_settings": True, "keep": []},
+            {"name": "sample-client", "path": str(cli_path), "roles": [], "file_types": {}, "keep": ["instructions"]},
+            {"name": "extra-repo", "path": str(extra), "roles": [], "file_types": {}}]
+        ok, lines, _ = g.job("/api/configure", {"repos": keep_plan})
+        srv_cfg = read_yaml(srv_path / "mcp" / "config.yaml")
+        cli_cfg = read_yaml(cli_path / "mcp" / "config.yaml")
+        check("overwrite chosen: folder roles replaced with the reviewed answers",
+              ok and srv_cfg.get("structure") == [{"path": "docs/**", "role": "example"}], str(srv_cfg.get("structure")))
+        check("overwrite chosen: GraphRAG settings reset to defaults, components left for later kept",
+              srv_cfg.get("top_k") == 5 and srv_cfg.get("deferred") == ["docs"], f"top_k {srv_cfg.get('top_k')}, deferred {srv_cfg.get('deferred')}")
+        check("keep chosen: the edited Copilot instructions are left as they were",
+              "MY OWN NOTE" in instr.read_text(encoding="utf-8") and any("kept as it was" in l for l in lines))
+        check("not kept: the agent skill is reinstalled (overwritten)", "MY SKILL EDIT" not in skill_md.read_text(encoding="utf-8"))
+        cli_saved = {u["ext"] for u in by["sample-client"].get("saved_types", [])}
+        check("keep: saved file types of a repository are kept when none are sent",
+              cli_saved and cli_saved <= set(cli_cfg.get("file_types") or {}),
+              ", ".join(sorted(cli_cfg.get("file_types") or {})))
+        check("a third repository is connected", "extra-repo" in {r["name"] for r in g.call("/api/state")[1]["repos"]})
+        code, bad = g.call("/api/configure", {"repos": [dict(keep_plan[1], keep=["everything"])]})
+        check("an unknown item to keep is refused", code == 400, bad.get("error", "")[:60])
+        ok, lines, _ = g.job("/api/configure", {"repos": [keep_plan[1]], "drop": ["extra-repo"]})
+        names = {r["name"] for r in g.call("/api/state")[1]["repos"]}
+        check("a repository removed in step 3 is disconnected; its files are left as they are",
+              ok and names == {"sample-server", "sample-client"} and (extra / "mcp" / "config.yaml").exists(), str(sorted(names)))
+        ok, lines, _ = g.job("/api/configure", {"repos": [dict(keep_plan[0], roles=[], keep=[])]})
+        srv_cfg = read_yaml(srv_path / "mcp" / "config.yaml")
+        check("overwrite with no role changes clears the saved folder roles", ok and srv_cfg.get("structure") == [],
+              str(srv_cfg.get("structure")))
+        ok, lines, _ = g.job("/api/verify", {"fresh": ["sample-client"], "deferred": {"sample-server": []}})
+        check("start from scratch: the repository's stored graph and vectors are removed, then rebuilt",
+              ok and any("from scratch" in l for l in lines) and
+              any("sample-client" in l and "0 reused" in l for l in lines),
+              next((l for l in lines if "0 reused" in l), "")[-80:])
+        code, r4 = g.call("/api/query", {"mode": "trace", "text": "IPasswordService"})
+        check("queries work after setting up again", code == 200 and r4["result"]["trace"].get("found"))
+
+        print("\n14. Restart: the GUI opens on the queries", flush=True)
         g.call("/api/quit", {})
         proc.wait(timeout=30)
         proc, url = start_gui(env)

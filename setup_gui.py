@@ -119,6 +119,7 @@ def ensure_in_venv(no_venv: bool):
 class Job:
     def __init__(self, name):
         self.name, self.lines, self.done, self.ok, self.result = name, [], False, None, None
+        self.progress = None                     # latest progress-bar event, if the step reports one
 
     def log(self, line):
         self.lines.append(line.rstrip("\n"))
@@ -268,6 +269,15 @@ def configured_repos() -> list:
             if not str(r.get("path", "")).startswith("/absolute/path/to/")]
 
 
+def existing(repo_path) -> dict:
+    """What an earlier setup left in a repository — the page asks before overwriting it."""
+    root = Path(repo_path).expanduser()
+    return {"config": (root / "mcp" / "config.yaml").is_file(),
+            "instructions": (root / ".github" / "copilot-instructions.md").is_file(),
+            "skill": (root / ".github" / "skills" / "cross-repo-feature-analysis").is_dir(),
+            "graph": (root / ".rag_index" / "graph.sqlite").is_file()}
+
+
 def suggestions() -> list:
     out, seen = [], set()
     for base in (FW.parent, Path.home()):
@@ -323,18 +333,26 @@ def state() -> dict:
     return {"framework": str(FW), "python": sys.executable, "in_venv": sys.prefix != sys.base_prefix,
             "deps_ok": ok, "model_ok": problem is None, "model_problem": problem, "model_dir": str(model_dir()),
             "model_default_dir": str(settings.model_dir(FW, {})), "model_custom": bool(orch_cfg().get("model_path")),
-            "model_copies": copies, "repos": configured_repos(), "suggestions": suggestions(),
+            "model_copies": copies, "repos": [dict(r, existing=existing(r["path"])) for r in configured_repos()],
+            "suggestions": suggestions(),
             "graph_ready": graph_ready(), "results_dir": str(RESULTS),
             "home": str(Path.home()), "samples": gitclone.SAMPLE_REPOS, "git": gitclone.available()}
 
 
 # ── actions ───────────────────────────────────────────────────────────────────
-def job_install(job):
-    rc = stream(job, [sys.executable, "-m", "pip", "install", "--timeout", "60", "--retries", "5",
-                      "--require-hashes", "-r", FW / "requirements.lock"])
-    if rc != 0:
-        raise RuntimeError("installation failed")
-    job.log("✓ requirements installed (hash-verified)")
+def job_install(body):
+    """Install the hash-locked packages; force=True reinstalls every one of them (overwrite)."""
+    force = bool(body.get("force"))
+
+    def run(job):
+        WORKER.stop()
+        rc = stream(job, [sys.executable, "-m", "pip", "install", "--timeout", "60", "--retries", "5",
+                          *(["--force-reinstall", "--no-deps"] if force else []),
+                          "--require-hashes", "-r", FW / "requirements.lock"])
+        if rc != 0:
+            raise RuntimeError("installation failed")
+        job.log("✓ requirements " + ("reinstalled" if force else "installed") + " (hash-verified)")
+    return run
 
 
 def job_model(body):
@@ -361,18 +379,42 @@ def scan(repos: list) -> list:
     return json.loads(r.stdout.strip().splitlines()[-1])
 
 
+KEEP_ITEMS = ("instructions", "skill")
+
+
+def configure_cmd(body: dict) -> list:
+    """configure.py command line for the page's plan. Per repository: roles and file types,
+    and for one configured before, what to overwrite (replace_roles, reset_settings) and
+    which generated files to keep. `drop` disconnects repositories removed in step 3."""
+    cmd = [sys.executable, SCRIPTS / "configure.py", "--framework", FW]
+    for r in body["repos"]:
+        n = r["name"]
+        cmd += ["--repo", f"{n}={r['path']}"]           # a new repository indexes "." by default
+        for ext, ft in (r.get("file_types") or {}).items():
+            cmd += ["--file-type", f"{n}={ext}:{ft['kind']}" + (f":{ft['parse_as']}" if ft.get("parse_as") else "")]
+        for role in r.get("roles") or []:
+            cmd += ["--role", f"{n}={role['path']}:{role['role']}" + (f":{role['index']}" if role.get("index") else "")]
+        if r.get("replace_roles"):
+            cmd += ["--replace-roles", n]
+        if r.get("reset_settings"):
+            cmd += ["--reset-settings", n]
+        for item in r.get("keep") or []:
+            if item not in KEEP_ITEMS:
+                raise ValueError(f"unknown item to keep: {item!r}")
+            cmd += ["--keep", f"{n}={item}"]
+    connected = {r["name"] for r in configured_repos()}
+    for n in body.get("drop") or []:
+        if n in connected:
+            cmd += ["--drop", n]
+    return cmd
+
+
 def job_configure(body):
+    cmd = configure_cmd(body)                           # invalid plans are refused before the job starts
+
     def run(job):
         WORKER.stop()                                   # configuration changes → reload graphs on next query
         GRAPH.reset()
-        cmd = [sys.executable, SCRIPTS / "configure.py", "--framework", FW]
-        for r in body["repos"]:
-            n = r["name"]
-            cmd += ["--repo", f"{n}={r['path']}", "--src", f"{n}=."]
-            for ext, ft in (r.get("file_types") or {}).items():
-                cmd += ["--file-type", f"{n}={ext}:{ft['kind']}" + (f":{ft['parse_as']}" if ft.get("parse_as") else "")]
-            for role in r.get("roles") or []:
-                cmd += ["--role", f"{n}={role['path']}:{role['role']}" + (f":{role['index']}" if role.get("index") else "")]
         rc = stream(job, cmd)
         if rc != 0:
             raise RuntimeError("configuration failed — see the log")
@@ -473,9 +515,11 @@ def job_model_path(body):
     return run
 
 
-def job_verify(job):
-    p = subprocess.Popen([sys.executable, str(GUI / "verify.py")], stdout=subprocess.PIPE, stderr=subprocess.PIPE,
-                         text=True, bufsize=1)
+def run_worker(job, script: str, args=()) -> dict:
+    """Run a gui/ worker that prints JSON lines: progress messages go to the log, progress-bar
+    events to job.progress; returns its result."""
+    p = subprocess.Popen([sys.executable, str(GUI / script), *args], stdout=subprocess.PIPE,
+                         stderr=subprocess.DEVNULL, text=True, bufsize=1, encoding="utf-8", errors="replace")
     result = None
     for line in p.stdout:
         try:
@@ -484,15 +528,64 @@ def job_verify(job):
             continue
         if msg.get("event") == "progress":
             job.log(msg["msg"])
+        elif msg.get("event") == "bar":
+            job.progress = msg
         elif msg.get("event") == "result":
             result = msg
     p.wait()
     if not result or not result.get("ok"):
-        raise RuntimeError((result or {}).get("error") or "verification failed")
-    job.log("✓ GraphRAG created and linked")
-    WORKER.stop()                                       # next query loads the fresh graphs
-    GRAPH.reset()
+        raise RuntimeError((result or {}).get("error") or f"{script} failed")
     return result
+
+
+def job_estimate(job):
+    result = run_worker(job, "estimate.py")
+    job.log("✓ estimate ready")
+    return result
+
+
+def set_deferred(deferred: dict) -> list:
+    """Write each repository's `deferred` setting: the components left for a later batch.
+    → names of the repositories whose setting changed."""
+    import yaml
+    from codegraph import components
+    repos = {r["name"]: r for r in configured_repos()}
+    changed = []
+    for name, paths in (deferred or {}).items():
+        if name not in repos:
+            raise ValueError(f"unknown repository {name!r}")
+        if not isinstance(paths, list) or any(not isinstance(x, str) or not x.strip() for x in paths):
+            raise ValueError(f"{name}: components must be folder names")
+        clean, errors = settings.validate({"deferred": [components.to_setting(x.strip()) for x in paths]})
+        if errors:
+            raise ValueError(f"{name}: {'; '.join(errors)}")
+        p = repo_cfg_path(repos[name])
+        text = p.read_text(encoding="utf-8") if p.exists() else ""
+        if settings.load(yaml.safe_load(text) or {})["deferred"] != clean["deferred"]:
+            p.write_text(set_yaml_key(text, "deferred", clean["deferred"]), encoding="utf-8")
+            changed.append(name)
+    return changed
+
+
+def job_verify(body=None):
+    """Create or update the GraphRAG. Optional body: deferred {repo: [components left for later]}
+    and fresh [repos to start from scratch]."""
+    body = body or {}
+    names = {r["name"] for r in configured_repos()}
+    fresh = [n for n in body.get("fresh") or [] if n in names]
+    changed = set_deferred(body.get("deferred"))        # invalid selections are refused before the job
+
+    def run(job):
+        WORKER.stop()                                   # nobody else holds the graphs while they're built
+        GRAPH.reset()
+        if changed:
+            job.log("Components for this batch saved for " + ", ".join(changed))
+        result = run_worker(job, "verify.py", [a for n in fresh for a in ("--fresh", n)])
+        job.log("✓ GraphRAG created and linked")
+        WORKER.stop()                                   # next query loads the fresh graphs
+        GRAPH.reset()
+        return result
+    return run
 
 
 # ── clone a repo from a URL + branch into a folder the user chose ────────────
@@ -613,7 +706,8 @@ class Handler(BaseHTTPRequestHandler):
                     return self._send(404, {"error": "no such job"})
                 since = int(q.get("since", ["0"])[0])
                 return self._send(200, {"name": job.name, "done": job.done, "ok": job.ok,
-                                        "lines": job.lines[since:], "next": len(job.lines), "result": job.result})
+                                        "lines": job.lines[since:], "next": len(job.lines), "result": job.result,
+                                        "progress": job.progress})
         except Exception as e:
             return self._send(500, {"error": str(e)})
         return self._send(404, {"error": "not found"})
@@ -627,7 +721,7 @@ class Handler(BaseHTTPRequestHandler):
         try:
             body = json.loads(self.rfile.read(int(self.headers.get("Content-Length") or 0)) or b"{}")
             if u.path == "/api/install":
-                return self._send(200, {"job": start_job("Install", job_install)})
+                return self._send(200, {"job": start_job("Install", job_install(body))})
             if u.path == "/api/model":
                 return self._send(200, {"job": start_job("Model", job_model(body))})
             if u.path == "/api/model_path":
@@ -639,8 +733,10 @@ class Handler(BaseHTTPRequestHandler):
                 return self._send(200, {"repos": scan(body["repos"])})
             if u.path == "/api/configure":
                 return self._send(200, {"job": start_job("Configure", job_configure(body))})
+            if u.path == "/api/estimate":
+                return self._send(200, {"job": start_job("Estimate", job_estimate)})
             if u.path == "/api/verify":
-                return self._send(200, {"job": start_job("Verify", job_verify)})
+                return self._send(200, {"job": start_job("Create GraphRAG", job_verify(body))})
             if u.path == "/api/clone":
                 return self._send(200, {"job": start_job("Clone", job_clone(body))})
             if u.path == "/api/query":

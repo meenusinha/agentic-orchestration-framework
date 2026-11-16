@@ -31,6 +31,7 @@ from .structure import resolve
 
 INDEX_FORMAT = 1
 _NOT_INDEXED_MARK = b"<!-- agentic-orchestration: framework template, not indexed -->"
+_FRAMEWORK_DIRS = (".github/skills/cross-repo-feature-analysis/",)   # installed by the setup, not the repo's own code
 EMBED_KINDS = {FUNCTION, METHOD, CLASS, TYPE, MACRO, IDL_INTERFACE, IDL_OPERATION, IDL_ATTRIBUTE, IDL_TYPE, DOC_SECTION, TEXT,
                MODULE, NAMESPACE, TARGET}
 NOT_SEARCHED_ROLES = {"test"}          # tests are evidence (TESTS edges), never results
@@ -114,7 +115,7 @@ def collect_files(cfg: IndexConfig):
                 if rel in seen:
                     continue
                 seen.add(rel)
-                if cfg.excluded(rel):
+                if cfg.excluded(rel) or rel.startswith(_FRAMEWORK_DIRS):
                     continue
                 if is_secret_file(ab):
                     secrets += 1
@@ -153,12 +154,20 @@ def _looks_textual(path: Path) -> bool:
     return b"\x00" not in head and bool(head.strip())
 
 
-def build(cfg: IndexConfig, store: Store, embedder, model_sha: str, log=lambda *a: None, force=False) -> dict:
+def _no_progress(stage: str, done: int, total: int) -> None:
+    pass
+
+
+def build(cfg: IndexConfig, store: Store, embedder, model_sha: str, log=lambda *a: None, force=False,
+          progress=_no_progress) -> dict:
+    """progress(stage, done, total) is called as work advances: stages "read", "parse",
+    "embed" (reported by the embedder itself) and "write"."""
     t0 = time.time()
     files, unknown, secret_files = collect_files(cfg)
     hashes = {}
     sources = {}
-    for rel, ab, lang in files:
+    for i, (rel, ab, lang) in enumerate(files):
+        progress("read", i, len(files))
         try:
             raw = ab.read_bytes()
         except OSError:
@@ -175,13 +184,15 @@ def build(cfg: IndexConfig, store: Store, embedder, model_sha: str, log=lambda *
     if not force and store.meta("fingerprint") == fp and store.file_hashes() == hashes and \
             store.meta("peer_signature") == peer_sig:
         log("INDEX", f"Code graph up to date ({len(hashes)} files)")
+        progress("write", 1, 1)
         return {"rebuilt": False, "files": len(hashes), "unclassified": store.meta("unclassified", {})}
 
     # ── parse ────────────────────────────────────────────────────────────────
     st = resolve(cfg.repo_root, sorted(sources), cfg.structure)
     trees: dict[str, Node] = {}
     redactions = 0
-    for rel, (text, lang) in sources.items():
+    for i, (rel, (text, lang)) in enumerate(sources.items()):
+        progress("parse", i, len(sources))
         if st.index_mode.get(rel) == "skip":           # developer's manifest: not indexed at all
             continue
         text, n = redact(text)
@@ -248,6 +259,7 @@ def build(cfg: IndexConfig, store: Store, embedder, model_sha: str, log=lambda *
         new_vecs = {sha: v for (sha, _), v in zip(items, vecs)}
 
     # ── write ────────────────────────────────────────────────────────────────
+    progress("write", 0, 1)
     with store.write() as db:
         for t in ("files", "nodes", "edges", "iface_refs"):
             db.execute(f"DELETE FROM {t}")
@@ -290,6 +302,7 @@ def build(cfg: IndexConfig, store: Store, embedder, model_sha: str, log=lambda *
                                      "implements": len(resolved["implements"]),
                                      "consumes": len(resolved["consumes"])})
     ifc.write_registry(store.dir / "interfaces.json", cfg.repo_name, defines, resolved)
+    progress("write", 1, 1)
     log("INDEX", f"Code graph built: {len(trees)} files, {len(all_nodes)} nodes, {len(edges)} edges, "
                  f"{len(defines)} IDL interface(s), {len(resolved['implements'])} implementation link(s), "
                  f"{len(resolved['consumes'])} client link(s) in {time.time() - t0:.1f}s")
@@ -297,6 +310,7 @@ def build(cfg: IndexConfig, store: Store, embedder, model_sha: str, log=lambda *
         log("WARN", f"  Unclassified file types not indexed: {', '.join(sorted(unknown))} "
                     "(classify them in mcp/config.yaml → file_types)")
     return {"rebuilt": True, "files": len(trees), "nodes": len(all_nodes), "edges": len(edges),
+            "embedded": len(new_vecs), "reused": len(cached),
             "unclassified": {k: v[:5] for k, v in unknown.items()}}
 
 

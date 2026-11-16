@@ -24,6 +24,7 @@ REPO_SETTINGS = {
     "src_path":           (".", "creation", "Folders to index (\".\" = the whole repository)", "paths", None, None),
     "knowledge_path":     ("./knowledge", "creation", "Extra documentation folders", "paths", None, None),
     "exclude":            ([], "creation", "Paths never indexed (globs, e.g. build/** or *.generated.c)", "globs", None, None),
+    "deferred":           ([], "creation", "Components left for a later batch (not indexed yet)", "globs", None, None),
     "extra_extensions":   ([], "creation", "Extra file extensions to index as plain text (e.g. .tmpl)", "exts", None, None),
     "max_file_kb":        (2000, "creation", "Files larger than this are skipped (KB)", "int", 10, 50000),
     "embed_batch_size":   (64, "creation", "Units embedded per batch (higher = faster, more memory)", "int", 1, 512),
@@ -52,6 +53,9 @@ HELP = {
                       "stored as one searchable unit.",
     "exclude": "Files and folders that are never indexed, as patterns relative to the repository root: build/** "
                "skips a folder, *.generated.c skips matching files. Excluded code can't be found or linked to.",
+    "deferred": "Parts of the repository (folders) not indexed yet, because the GraphRAG is being created in "
+                "batches. Step 6 of the setup page fills this in when you choose fewer components for a batch; "
+                "remove an entry (or choose it in step 6) to include it in the next build. Empty = everything.",
     "extra_extensions": "File types that aren't recognised automatically but should still be searchable. Their "
                         "files are stored as whole plain-text units (no functions or classes). For code in another "
                         "language, answer the question in the Review step instead.",
@@ -177,7 +181,7 @@ def load(cfg: dict | None, spec=REPO_SETTINGS) -> dict:
 def rag_kwargs(repo_cfg: dict | None) -> dict:
     """Keyword arguments for RepoRAG(...) that depend on settings — identical in every builder."""
     s = load(repo_cfg)
-    return {"top_k": s["top_k"], "budget_tokens": s["result_budget_tokens"], "exclude": s["exclude"],
+    return {"top_k": s["top_k"], "budget_tokens": s["result_budget_tokens"], "exclude": s["exclude"] + s["deferred"],
             "max_file_bytes": s["max_file_kb"] * 1024, "embed_batch_size": s["embed_batch_size"],
             "candidate_pool": s["candidate_pool"], "rrf_k": s["rrf_k"], "role_weights": s["role_weights"],
             "impact_depth": s["impact_depth"]}

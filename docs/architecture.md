@@ -33,6 +33,18 @@ Supported platforms: **Windows and Linux**.
 | `search.py` | Hybrid ranking (vectors + keywords), interface tracing, impact analysis, whole-unit result assembly |
 | `security.py` | Secret-file exclusion and redaction |
 | `settings.py` | Every creation, query and router setting with its default and range; used by every program that builds or searches a graph, so they always build identical graphs |
+| `components.py` | Divides a repository into components (top-level folders; a folder holding most of a large repository is split into its sub-folders) for the time estimate and for building in batches |
+
+### Setup page workers
+
+The setup page runs the heavy work in separate processes, so the page stays responsive.
+Each prints JSON lines (progress, then one result) that the page streams.
+
+| Worker | Responsibility |
+|---|---|
+| `gui/estimate.py` | Read-only: lists the files to index per component, marks those already in the GraphRAG with unchanged content, and parses and embeds a sample of about 150 KB of real code with the real model, giving seconds per byte for parsing and for embedding on this computer |
+| `gui/verify.py` | Builds (pass 1) and links (pass 2) every graph; reports progress-bar events (repository, stage, done/total, overall fraction, time left in the stage); `--fresh NAME` starts a repository from scratch |
+| `gui/query_worker.py` | Loads the model and all graphs once and answers the query field |
 
 ---
 
@@ -65,7 +77,7 @@ VS Code window (one per open repository)
  └── repository MCP servers       (1 per connected repository, per window)
         each: loads the model once, opens its graph, refreshes it at most once a minute
 
-Setup page (only while open)
+Setup page (only while open; at most one long-running step at a time)
  ├── HTTP server on 127.0.0.1     (standard library)
  └── query worker                 (loads the model and all graphs once, for the query field)
 ```
@@ -87,7 +99,7 @@ Measured on a small repository:
 | Memory per running server | about 0.75 GB peak |
 | First query on the setup page | about 4 s (loads the model and graphs); then well under 1 s |
 | Incremental update after an edit | proportional to the changed files only (unchanged units keep their cached vectors) |
-| First full build | from seconds (small repositories) to a few minutes (large ones) |
+| First full build | from seconds (small repositories) to hours (very large ones, mostly embedding on the CPU). Step 6 estimates it per component on the machine itself and offers to build in batches |
 
 Because each connected repository runs its own server in every VS Code window, plan on
 roughly 0.75 GB × (number of connected repositories) per open window.
@@ -110,6 +122,15 @@ roughly 0.75 GB × (number of connected repositories) per open window.
 - **Atomic files.** JSON files are written to a temporary file and then renamed into
   place, so readers never see a partial file. On Windows the rename is retried briefly
   while another process has the file open.
+- **Batches.** Components left for a later batch are stored in the repository's
+  `deferred` setting. `settings.rag_kwargs` adds them to the excluded paths for every
+  builder (the MCP servers, the router, the query field and step 6), so all of them build
+  the same graph. Adding a component later changes the configuration fingerprint: the
+  graph is rebuilt, and only the new component's units are embedded; every other vector
+  comes from the embedding cache.
+- **Starting from scratch.** Step 6's *start from scratch* empties the repository's
+  `graph.sqlite` in one exclusive transaction, cached vectors included, instead of deleting
+  the file. This also works while VS Code servers have it open.
 - **Rebuild triggers.** The graph is updated when files change (content hashes), when
   the repository's settings change (configuration fingerprint), when the framework's
   own code changes, and when a connected repository publishes new interfaces.

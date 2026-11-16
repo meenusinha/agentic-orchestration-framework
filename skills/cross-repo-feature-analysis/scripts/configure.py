@@ -16,6 +16,15 @@ Does steps 2-5 of the README for the agent:
 Safe to re-run: existing repos keep their settings unless a flag for them is
 given, new ones are added. Run scan.py first to see what each repo should index.
 
+Re-running for repos that are already configured — choose what is overwritten:
+  --replace-roles NAME       folder roles and file types become exactly the --role and
+                             --file-type values given (default: they are merged in)
+  --reset-settings NAME      GraphRAG creation and query settings back to their defaults
+                             (folders to index and components left for later are kept)
+  --keep NAME=instructions   keep the repo's .github/copilot-instructions.md as it is
+  --keep NAME=skill          keep the repo's installed agent skill as it is
+  --drop NAME                disconnect a repo (its files are left untouched)
+
 Indexing flags are repeatable and per repo (NAME is the repo id):
   --src NAME=./server        source folder or glob; repeat for several; NAME=null for none
   --knowledge NAME=./docs    extra .md doc folder; ./knowledge is always included
@@ -374,6 +383,20 @@ def _require_classified(framework: Path, targets, file_types_by) -> None:
                          "\n".join(problems))
 
 
+KEEP_ITEMS = ("instructions", "skill")
+# Settings --reset-settings leaves alone: what to index is chosen elsewhere (src_path,
+# knowledge_path) or batch by batch on the setup page (deferred).
+_NOT_RESET = ("src_path", "knowledge_path", "deferred")
+
+
+def _setting_defaults(framework: Path) -> dict:
+    mcp_dir = framework / "repo-agent" / "mcp"
+    if str(mcp_dir) not in sys.path:
+        sys.path.insert(0, str(mcp_dir))
+    from codegraph import settings
+    return {k: v for k, v in settings.defaults().items() if k not in _NOT_RESET}
+
+
 def _install_repo_agent(framework: Path, name: str, display: str, repo: Path, indexing: dict) -> str:
     """Install/refresh the repo agent. `indexing` holds only the keys the user set."""
     template = framework / "repo-agent"
@@ -442,6 +465,14 @@ def main() -> None:
                     help="proceed even if some file types are still unclassified (they are not indexed)")
     ap.add_argument("--ext", action="append", default=[], metavar="NAME=.EXT",
                     help="extra file extension to index as code for a repo (repeatable)")
+    ap.add_argument("--replace-roles", action="append", default=[], metavar="NAME",
+                    help="folder roles and file types become exactly the given --role/--file-type values")
+    ap.add_argument("--reset-settings", action="append", default=[], metavar="NAME",
+                    help="GraphRAG creation and query settings back to their defaults")
+    ap.add_argument("--keep", action="append", default=[], metavar="NAME=ITEM",
+                    help=f"keep an existing generated file as it is; ITEM: {', '.join(KEEP_ITEMS)}")
+    ap.add_argument("--drop", action="append", default=[], metavar="NAME",
+                    help="disconnect a repo (its files are left untouched)")
     args = ap.parse_args()
 
     framework = Path(args.framework).expanduser().resolve()
@@ -487,6 +518,11 @@ def main() -> None:
     orch_cfg_path = framework / "orchestrator" / "mcp" / "config.yaml"
     orch_cfg = yaml.safe_load(orch_cfg_path.read_text()) or {}
     repos = [r for r in orch_cfg.get("repos") or [] if not str(r.get("path", "")).startswith(PLACEHOLDER)]
+    unknown_drop = set(args.drop) - {r["name"] for r in repos}
+    if unknown_drop:
+        raise SystemExit(f"ERROR: --drop {sorted(unknown_drop)}: not a connected repo")
+    dropped = [r for r in repos if r["name"] in args.drop]
+    repos = [r for r in repos if r["name"] not in args.drop]
     by_name = {r["name"]: r for r in repos}
 
     # Validate everything before writing anything, so a bad argument never
@@ -500,7 +536,15 @@ def main() -> None:
                 f"ERROR: {path / 'mcp'} exists but is not a repo-agent folder. "
                 "Rename it or move it aside, then re-run."
             )
-    unknown = (set(src_by) | set(knowledge_by) | set(ext_by) | set(ftype_by) | set(role_by)) - \
+    keep_by = _per_repo(args.keep)
+    for n, items in keep_by.items():
+        bad = [i for i in items if i not in KEEP_ITEMS]
+        if bad:
+            raise SystemExit(f"ERROR: --keep {n}={bad[0]}: ITEM must be one of {', '.join(KEEP_ITEMS)}")
+    if {n for n, _, _ in targets} & set(args.drop):
+        raise SystemExit("ERROR: a repo can't be both connected (--repo) and dropped (--drop)")
+    unknown = (set(src_by) | set(knowledge_by) | set(ext_by) | set(ftype_by) | set(role_by) |
+               set(args.replace_roles) | set(args.reset_settings) | set(keep_by)) - \
         {n for n, _, _ in targets}
     if unknown:
         raise SystemExit(f"ERROR: --src/--knowledge/--ext/--file-type/--role name(s) {sorted(unknown)} "
@@ -531,21 +575,32 @@ def main() -> None:
             indexing["knowledge_path"] = _one_or_list(dirs)
         if name in ext_by:
             indexing["extra_extensions"] = [e if e.startswith(".") else f".{e}" for e in ext_by[name]] or None
-        if name in file_types_by:
-            current = (_read_repo_cfg(path).get("file_types") or {})
-            indexing["file_types"] = {**current, **file_types_by[name]}
-        if name in structure_by:
-            indexing["structure"] = structure_by[name]
+        if name in args.replace_roles:                  # exactly what the developer confirmed
+            indexing["file_types"] = file_types_by.get(name, {})
+            indexing["structure"] = structure_by.get(name, [])
+        else:                                           # merged into what is saved
+            if name in file_types_by:
+                current = (_read_repo_cfg(path).get("file_types") or {})
+                indexing["file_types"] = {**current, **file_types_by[name]}
+            if name in structure_by:
+                current = _read_repo_cfg(path).get("structure") or []
+                given = {e["path"] for e in structure_by[name]}
+                indexing["structure"] = structure_by[name] + [e for e in current if e.get("path") not in given]
+        if name in args.reset_settings:
+            indexing.update(_setting_defaults(framework))
         summary = _install_repo_agent(framework, name, entry.get("display_name", name), path, indexing)
         print(f"  ✓ {name:20s} {path}\n      {summary}")
 
+    for r in dropped:
+        print(f"  ✓ {r['name']:20s} disconnected (its files in {r['path']} are left as they are)")
     orch_cfg["repos"] = repos
     orch_cfg.setdefault("log_file", DEFAULT_LOG_FILE)
     orch_cfg.setdefault("log_content", False)
     orch_cfg_path.write_text(ORCH_HEADER + yaml.safe_dump(orch_cfg, sort_keys=False))
     print(f"  ✓ orchestrator config      {orch_cfg_path}  ({len(repos)} repos)\n", flush=True)
 
-    result = subprocess.run([sys.executable, str(framework / "orchestrator" / "setup.py")],
+    keep_args = [a for n, items in keep_by.items() for i in items for a in ("--keep", f"{n}={i}")]
+    result = subprocess.run([sys.executable, str(framework / "orchestrator" / "setup.py"), *keep_args],
                             cwd=framework / "orchestrator")
     sys.exit(result.returncode)
 
