@@ -86,9 +86,16 @@ class Node:
 
     @property
     def uid(self) -> str:
-        """Stable id across rebuilds: file + kind + qualname + start line."""
+        """Stable id across rebuilds: file + kind + qualname + start line. Cached (it is read millions
+        of times while linking), and recomputed if any of those four ever changes."""
+        key = (self.file, self.kind, self.qualname, self.start_line)
+        cached = self.__dict__.get("_uid")
+        if cached is not None and cached[0] == key:
+            return cached[1]
         raw = f"{self.file}\x00{self.kind}\x00{self.qualname}\x00{self.start_line}"
-        return hashlib.sha1(raw.encode()).hexdigest()[:16]
+        uid = hashlib.sha1(raw.encode()).hexdigest()[:16]
+        self.__dict__["_uid"] = (key, uid)
+        return uid
 
     def walk(self):
         yield self

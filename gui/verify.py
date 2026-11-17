@@ -131,7 +131,8 @@ def main():
                 rags[r["name"]] = RepoRAG(r["name"], str(root), settings.roots(root, rc), embedding_model=str(model),
                                           file_types=rc.get("file_types"), structure=rc.get("structure"),
                                           extra_extensions=rc.get("extra_extensions"), peers=peers,
-                                          progress=bar.hook(p, r["name"]), **settings.rag_kwargs(rc))
+                                          progress=bar.hook(p, r["name"]), parse_workers=settings.parse_workers(rc),
+                                          **settings.rag_kwargs(rc))
                 if r["name"] in args.fresh:
                     emit(event="progress", msg=f"Starting {r['name']} from scratch (stored graph and vectors removed) …")
                     rags[r["name"]].clear_index()
@@ -139,6 +140,8 @@ def main():
             stats[r["name"]] = st = rags[r["name"]].build_or_load_index() or {}
             if p == 1 and st.get("speed"):
                 speeds.append(st["speed"])
+            if st.get("parallel_fallback"):
+                emit(event="progress", msg=f"  {r['name']}: parallel parsing unavailable — parsed one file at a time")
             if st.get("rebuilt"):
                 emit(event="progress", msg=f"  {r['name']}: {st['files']} files, {st['nodes']} units — "
                                           f"{st.get('embedded', 0)} embedded, {st.get('reused', 0)} reused")

@@ -98,8 +98,8 @@ Status: **done** (implemented and tested) · **in progress** · **planned** · *
 
 | ID | Requirement | Status | Where |
 |---|---|---|---|
-| P1 | Work over all files of a repository runs **in parallel**: listing, sizing, reading and hashing files with threads (I/O releases the interpreter lock), parsing in worker processes (CPU-bound) — for the scan (file types), the estimate (size, what is already indexed) and the build | planned | see [D9](#decisions) |
-| P2 | A `workers` setting (default: number of CPU cores; 1 = no parallelism); speed-up measured on large repositories before it is enabled by default | planned | |
+| P1 | Work over all files of a repository runs **in parallel**: file checks, sizing, reading and hashing with threads — in the scan (file types), the estimate (size, what is already indexed) and every build; skip rules, secret redaction and parsing in worker processes — in the setup page's and command line's build only. Identical result; falls back to one file at a time if worker processes can't start | done | `codegraph/parallel.py`; see [D9](#decisions), [D10](#decisions) |
+| P2 | A `workers` setting (0 = automatic: 8 threads, one process per CPU core; 1 = off), measured before being enabled by default | done | 26 MB repository: reading, parsing and linking 23.1 s → 8.6 s (2.7×); 6.5 MB: 4.8 s → 2.3 s; graphs identical |
 
 ## 5. Queries and browsing
 
@@ -145,7 +145,6 @@ Status: **done** (implemented and tested) · **in progress** · **planned** · *
 |---|---|
 | Windows test run (T3) | open — the developer runs it |
 | `test_mcp.py` should honour the `model_path` setting (it always uses the bundled model) | open — offered, not yet approved |
-| P1–P2 parallel file processing | planned (after G9, G10) |
 
 ---
 
@@ -162,3 +161,4 @@ Status: **done** (implemented and tested) · **in progress** · **planned** · *
 | D7 | 2026-11-16 | Chunking offers all three modes, selectable per repository: knowledge graph (default), sliding window, hybrid; graph links built in every mode | Chosen by the developer |
 | D8 | 2026-11-16 | Skip rules blank the matched text (same number of lines) instead of deleting it | Line numbers in results stay correct |
 | D9 | 2026-11-16 | Threads for file I/O and hashing; worker processes for parsing | Python threads run in parallel only while waiting on I/O or in code that releases the interpreter lock (file reads, SHA-256); parsing holds it, so it needs processes to use several cores |
+| D10 | 2026-11-16 | Worker processes only in the setup page's and command line's build, started with "spawn", for 200+ files; the VS Code servers parse sequentially | On Windows a process starts by importing the main program again, and a server's main program builds its graph on import; forking a process that already runs threads is unsafe. Measured: threads alone did not speed up parsing (7.3 s → 7.9 s) |

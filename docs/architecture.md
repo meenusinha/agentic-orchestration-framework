@@ -36,6 +36,7 @@ Supported platforms: **Windows and Linux**.
 | `settings.py` | Every creation, query and router setting with its default and range; used by every program that builds or searches a graph, so they always build identical graphs |
 | `chunking.py` | Chunking modes: whole units (`graph`), overlapping line windows linked to the units they cover (`sliding`), whole units plus windows for long units (`hybrid`); decides what is embedded and keyword-indexed |
 | `skiprules.py` | Skip rules: the top-of-file comment block containing given words, and regular expressions; matched text is blanked (line numbers kept) before redaction and parsing; patterns are validated |
+| `parallel.py` | Threads for reading and hashing files; worker processes ("spawn") for the per-file work — skip rules, secret redaction, parsing — in the setup page's and command line's build only (never inside the VS Code servers); results in input order, so a parallel build is identical to a sequential one; falls back to one file at a time if worker processes can't start |
 | `embedcost.py` | Cost of embedding a text relative to its length (measured: grows with the square of the length, constant beyond the model's 8192-token limit); used by the progress bar and the time estimate |
 | `components.py` | Divides a repository into components (top-level folders; a folder holding most of a large repository is split into its sub-folders) for the time estimate and for building in batches |
 

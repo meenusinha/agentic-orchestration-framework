@@ -99,19 +99,19 @@ def survey(repo: dict, tick) -> dict:
     cfg_file = root / "mcp" / "config.yaml"
     rc = (yaml.safe_load(cfg_file.read_text(encoding="utf-8")) or {}) if cfg_file.exists() else {}
     s = settings.load(rc)
+    from codegraph.parallel import io_map, io_workers
+    threads = io_workers(s["workers"])
     ic = IndexConfig(repo["name"], root, settings.roots(root, rc), rc.get("file_types"), rc.get("structure"),
                      rc.get("extra_extensions"), max_file_bytes=s["max_file_kb"] * 1024,
-                     exclude=s["exclude"])                     # deferred components are listed too
+                     exclude=s["exclude"], io_workers=threads)   # deferred components are listed too
     tick(f"{repo['name']}: listing files …", force=True)
     files, _, _ = collect_files(ic)
-    sized = []
-    for rel, ab, lang in files:
+    def size_of(f):
         try:
-            size = ab.stat().st_size
+            return f[0], f[1], f[2], f[1].stat().st_size
         except OSError:
-            continue
-        if size <= ic.max_file_bytes:
-            sized.append((rel, ab, lang, size))
+            return None
+    sized = [x for x in io_map(size_of, files, threads) if x and x[3] <= ic.max_file_bytes]
     tick(f"{repo['name']}: reading folder roles and build files …", force=True)
     st = resolve(root, [rel for rel, _, _, _ in sized], ic.structure)
     share = {rel: embed_share(st.roles.get(rel, "implementation"), st.index_mode.get(rel, "full"))
@@ -120,15 +120,15 @@ def survey(repo: dict, tick) -> dict:
     stored = store.file_hashes() if store is not None else {}
     if store is not None:
         store.close()
-    cached = set()
     candidates = [(rel, ab) for rel, ab, _, _ in sized if rel in stored]
-    for i, (rel, ab) in enumerate(candidates):
-        tick(f"{repo['name']}: checking what is already in the GraphRAG — {i}/{len(candidates)} files")
+    tick(f"{repo['name']}: checking what is already in the GraphRAG — {len(candidates)} files", force=True)
+
+    def unchanged(c):
         try:
-            if _sha(ab) == stored[rel]:
-                cached.add(rel)
+            return c[0] if _sha(c[1]) == stored[c[0]] else None
         except OSError:
-            continue
+            return None
+    cached = {rel for rel in io_map(unchanged, candidates, threads) if rel}
     deferred = {components.from_setting(d) for d in s["deferred"]}
     comps = []
     for c in components.group([(rel, size) for rel, _, _, size in sized]):

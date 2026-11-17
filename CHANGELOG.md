@@ -50,6 +50,10 @@ First release for VS Code with GitHub Copilot, on Windows and Linux, under the A
   **Select all** / **Exclude all**, plus sub-folders or file patterns typed or chosen with
   **Browse…**; saved as the `exclude` setting. Step 6 has **Select all** / **Select none**
   per repository and for all. `configure.py` gains `--exclude`.
+- **Parallel file processing**: threads for file checks, reading and hashing (scan, estimate,
+  build); worker processes for skip rules, redaction and parsing in the setup page's and command
+  line's build — 2.7× faster reading, parsing and linking on a 26 MB repository, identical graph.
+  Setting `workers` (0 = automatic, 1 = off). Node ids are cached while linking.
 - **Configurable chunking** per repository: knowledge graph (whole units, default), sliding window
   (chunks of N lines with overlap, linked to the code they cover) or hybrid (whole units, long ones
   also searched in windows); chunk size and overlap configurable. Graph links are built in every mode.

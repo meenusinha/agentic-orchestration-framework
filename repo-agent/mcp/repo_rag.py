@@ -159,14 +159,16 @@ class RepoRAG:
                  exclude: list = None, max_file_bytes: int = 2_000_000, embed_batch_size: int = 64,
                  candidate_pool: int = 60, rrf_k: int = 60, role_weights: dict = None, impact_depth: int = 2,
                  progress=None, chunking: str = "graph", chunk_lines: int = 60, chunk_overlap: int = 15,
-                 skip_header_words: list = None, skip_patterns: list = None):
+                 skip_header_words: list = None, skip_patterns: list = None, io_workers: int = 8,
+                 parse_workers: int = 1):
         self.repo_name = repo_name
         self.repo_root = Path(repo_root)
         self.top_k, self.budget = top_k, budget_tokens
         self.cfg = IndexConfig(repo_name, self.repo_root, roots, file_types, structure, extra_extensions, peers,
                                max_file_bytes=max_file_bytes, exclude=exclude, chunking=chunking,
                                chunk_lines=chunk_lines, chunk_overlap=chunk_overlap,
-                               skip_header_words=skip_header_words, skip_patterns=skip_patterns)
+                               skip_header_words=skip_header_words, skip_patterns=skip_patterns, io_workers=io_workers)
+        self.parse_workers = parse_workers              # > 1 only in the setup page's / command line's build
         self.batch = max(1, int(embed_batch_size))
         self.search_opts = {"candidate_pool": candidate_pool, "rrf_k": rrf_k, "role_weights": role_weights}
         self.impact_depth = impact_depth
@@ -212,7 +214,8 @@ class RepoRAG:
         log(self.repo_name, "INDEX", "Building/loading code graph...")
         self.store = Store(self.index_dir)
         stats = build(self.cfg, self.store, self._embed, self._model_sha,
-                      log=lambda lvl, msg: log(self.repo_name, lvl, msg), force=force, progress=self.progress)
+                      log=lambda lvl, msg: log(self.repo_name, lvl, msg), force=force, progress=self.progress,
+                      parse_workers=self.parse_workers)
         self.search = GraphSearch(self.store, self.repo_name, self._embed_query, self.cfg.peers, **self.search_opts)
         log(self.repo_name, "INDEX", "Code graph ready")
         return stats

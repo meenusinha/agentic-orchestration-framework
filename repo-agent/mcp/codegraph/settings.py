@@ -33,6 +33,7 @@ REPO_SETTINGS = {
     "skip_patterns":      ([], "creation", "Text never indexed (regular expressions, one per line)", "regexes", None, None),
     "max_file_kb":        (2000, "creation", "Files larger than this are skipped (KB)", "int", 10, 50000),
     "embed_batch_size":   (64, "creation", "Units embedded per batch (higher = faster, more memory)", "int", 1, 512),
+    "workers":            (0, "creation", "Parallel workers for reading and parsing files (0 = automatic, 1 = off)", "int", 0, 64),
     "refresh_seconds":    (60, "creation", "How often a server checks for changed files (seconds)", "int", 10, 3600),
     # ── Queries ──
     "top_k":              (5, "query", "Results per search, per repository", "int", 1, 20),
@@ -83,6 +84,10 @@ HELP = {
                    "indexes them, but building takes longer and results get noisier.",
     "embed_batch_size": "How many units are turned into vectors at once while building. Higher is faster but "
                         "uses more memory; lower it if a build runs out of memory. It doesn't change the results.",
+    "workers": "How many files are read and parsed at the same time when the GraphRAG is created. 0 picks it "
+               "automatically: 8 threads for reading and hashing files, and one worker process per CPU core for "
+               "parsing (setup page and command line only, for repositories of 200 files or more). 1 turns it off. "
+               "The result is the same either way; only the speed changes. Embedding already uses every core.",
     "refresh_seconds": "How often each running MCP server checks for changed files and updates the graph. Only "
                        "changed units are re-embedded. Lower = fresher results, a little more disk activity.",
     "top_k": "The maximum number of results one search returns from each repository. Copilot can ask for a "
@@ -234,7 +239,19 @@ def index_kwargs(repo_cfg: dict | None) -> dict:
     return {"exclude": s["exclude"] + s["deferred"], "max_file_bytes": s["max_file_kb"] * 1024,
             "chunking": s["chunking"], "chunk_lines": s["chunk_lines"],
             "chunk_overlap": min(s["chunk_overlap"], s["chunk_lines"] - 1),
-            "skip_header_words": s["skip_header_words"], "skip_patterns": s["skip_patterns"]}
+            "skip_header_words": s["skip_header_words"], "skip_patterns": s["skip_patterns"],
+            "io_workers": _io_workers(s["workers"])}
+
+
+def _io_workers(setting: int) -> int:
+    from .parallel import io_workers
+    return io_workers(setting)
+
+
+def parse_workers(repo_cfg: dict | None) -> int:
+    """Worker processes for parsing — only for the setup page's and the command line's build."""
+    from .parallel import cpu_workers
+    return cpu_workers(load(repo_cfg)["workers"])
 
 
 def rag_kwargs(repo_cfg: dict | None) -> dict:

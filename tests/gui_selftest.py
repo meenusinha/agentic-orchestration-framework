@@ -249,7 +249,8 @@ def _run(a):
         a.server_url = a.server_url or remotes["sample-server"]
         a.client_url = a.client_url or remotes["sample-client"]
     # a foreign PYTHONPATH (other tools' libraries) must be ignored by everything the GUI runs
-    env = {**os.environ, "PYTHONUNBUFFERED": "1", "PYTHONPATH": make_foreign_pythonpath()}
+    env = {**os.environ, "PYTHONUNBUFFERED": "1", "PYTHONPATH": make_foreign_pythonpath(),
+           "AO_PARALLEL_MIN_FILES": "1"}   # small test repositories still take the parallel (worker process) path
     env.pop("VIRTUAL_ENV", None)
 
     print(f"\n1. Start the GUI ({sys.platform})", flush=True)
@@ -549,6 +550,22 @@ def _run(a):
         g.call("/api/settings", {"repos": {"sample-server": {"top_k": 5, "result_budget_tokens": 6000, "exclude": []}},
                                  "router": {"router_top_repos": 2}})
         g.job("/api/verify", {})
+
+        print("\n12a. Parallel reading and parsing", flush=True)
+
+        def graph_signature():
+            sig = {}
+            for o in g.call("/api/graph/overview")[1].get("repos", []):
+                sig[o["repo"]] = (o.get("files"), o.get("nodes"), o.get("links"), o.get("cross_repo"))
+            return sig
+        g.call("/api/settings", {"repos": {n: {"workers": 1} for n in ("sample-server", "sample-client")}})
+        ok1, _, _ = g.job("/api/verify", {"fresh": ["sample-server", "sample-client"]})
+        seq = graph_signature()
+        g.call("/api/settings", {"repos": {n: {"workers": 0} for n in ("sample-server", "sample-client")}})
+        ok2, lines, _ = g.job("/api/verify", {"fresh": ["sample-server", "sample-client"]})
+        par = graph_signature()
+        check("parallel build (worker processes) gives exactly the same graph as a sequential one",
+              ok1 and ok2 and seq and seq == par and not any("unavailable" in l for l in lines), f"{par}")
 
         print("\n12b. Chunking and skip rules", flush=True)
         policy = Path(res["repos"][0]) / "policy" / "pwd_policy.c"

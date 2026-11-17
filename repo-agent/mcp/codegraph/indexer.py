@@ -21,6 +21,7 @@ from pathlib import Path, PurePosixPath
 
 from . import chunking
 from . import interfaces as ifc
+from . import parallel
 from .embedcost import work as embed_work
 from .extract import language_for, extract
 from .model import (CLASS, CONTAINERS, DOC_SECTION, FIELD, FILE, FUNCTION, FUNCTION_DECL, IDL_ATTRIBUTE,
@@ -66,7 +67,7 @@ class IndexConfig:
                  structure: list | None = None, extra_extensions: list | None = None, peers: list | None = None,
                  max_file_bytes: int = 2_000_000, exclude: list | None = None, chunking: str = "graph",
                  chunk_lines: int = 60, chunk_overlap: int = 15, skip_header_words: list | None = None,
-                 skip_patterns: list | None = None):
+                 skip_patterns: list | None = None, io_workers: int = parallel.IO_THREADS):
         self.repo_name, self.repo_root = repo_name, Path(repo_root).resolve()
         self.roots = [Path(r).resolve() for r in roots]
         self.file_types = {k.lower() if k.startswith(".") else k: v for k, v in (file_types or {}).items()}
@@ -80,6 +81,7 @@ class IndexConfig:
         self.chunk_lines = max(int(chunk_lines), 1)
         self.chunk_overlap = min(max(int(chunk_overlap), 0), self.chunk_lines - 1)
         self.skip = SkipRules(list(skip_header_words or []), list(skip_patterns or []))
+        self.io_workers = max(1, int(io_workers))      # threads for file I/O; never changes the result
 
     def fingerprint(self, model_sha: str) -> str:
         return hashlib.sha256(json.dumps({
@@ -110,8 +112,10 @@ def _code_version() -> str:
 
 
 def collect_files(cfg: IndexConfig):
-    """→ (indexable [(rel, abs, lang)], unclassified {ext: [sample rel paths]}, skipped_secret count)"""
-    out, unknown, secrets, seen = [], {}, 0, set()
+    """→ (indexable [(rel, abs, lang)], unclassified {ext: [sample rel paths]}, skipped_secret count)
+    The folders are walked in order; the per-file checks that read from disk run in threads
+    (cfg.io_workers), and their results are combined in the same order."""
+    candidates, seen = [], set()
     for root in cfg.roots:
         if not root.exists():
             continue
@@ -129,22 +133,32 @@ def collect_files(cfg: IndexConfig):
                 seen.add(rel)
                 if cfg.excluded(rel) or rel.startswith(_FRAMEWORK_DIRS):
                     continue
-                if is_secret_file(ab):
-                    secrets += 1
-                    continue
-                ext = PurePosixPath(fn).suffix.lower()
-                if ext in _BINARY_EXT:
-                    continue
-                if _is_framework_file(ab):                # our own templates / generated instructions
-                    continue
-                lang = language_for(rel, cfg.file_types)
-                if not lang:
-                    ft = cfg.file_types.get(ext) or cfg.file_types.get(fn)
-                    if ft is None and ext and ext not in _KNOWN_DATA_EXT and _looks_textual(ab):
-                        unknown.setdefault(ext, []).append(rel)
-                    continue
-                out.append((rel, ab, lang))
+                candidates.append((rel, ab, fn))
+    out, unknown, secrets = [], {}, 0
+    for kind, rel, ab, value in parallel.io_map(lambda c: _classify(cfg, *c), candidates, cfg.io_workers):
+        if kind == "secret":
+            secrets += 1
+        elif kind == "unknown":
+            unknown.setdefault(value, []).append(rel)
+        elif kind == "index":
+            out.append((rel, ab, value))
     return out, unknown, secrets
+
+
+def _classify(cfg: IndexConfig, rel: str, ab: Path, fn: str) -> tuple:
+    """One file → ("secret"|"skip"|"unknown"|"index", rel, path, extension or language)."""
+    if is_secret_file(ab):
+        return "secret", rel, ab, None
+    ext = PurePosixPath(fn).suffix.lower()
+    if ext in _BINARY_EXT or _is_framework_file(ab):     # binaries; our own templates / instructions
+        return "skip", rel, ab, None
+    lang = language_for(rel, cfg.file_types)
+    if lang:
+        return "index", rel, ab, lang
+    ft = cfg.file_types.get(ext) or cfg.file_types.get(fn)
+    if ft is None and ext and ext not in _KNOWN_DATA_EXT and _looks_textual(ab):
+        return "unknown", rel, ab, ext
+    return "skip", rel, ab, None
 
 
 def _is_framework_file(path: Path) -> bool:
@@ -170,27 +184,52 @@ def _no_progress(*args, **kwargs) -> None:
     pass
 
 
+def _read(item):
+    """(rel, path, lang) → (rel, lang, bytes or None, sha256 or None) — runs in a thread."""
+    rel, ab, lang = item
+    try:
+        raw = ab.read_bytes()
+    except OSError:
+        return rel, lang, None, None
+    return rel, lang, raw, hashlib.sha256(raw).hexdigest()
+
+
+def _parse(item):
+    """(rel, text, lang, skip rules) → (tree or None, text as indexed, skipped blocks, redactions,
+    error name). The per-file work — skip rules, secret redaction, parsing — may run in a worker
+    process."""
+    rel, text, lang, skip = item
+    hits = []
+    if skip:                                             # developer's skip rules: blanked, line numbers kept
+        text, hits = skip.apply(text)
+    text, n = redact(text)
+    try:
+        return extract(rel, text, lang), text, len(hits), n, None
+    except Exception as e:                               # never let one odd file stop the index
+        return None, text, len(hits), n, type(e).__name__
+
+
 def build(cfg: IndexConfig, store: Store, embedder, model_sha: str, log=lambda *a: None, force=False,
-          progress=_no_progress) -> dict:
+          progress=_no_progress, parse_workers: int = 1) -> dict:
     """progress(stage, done, total) is called as work advances: stages "read", "parse",
-    "embed" (reported by the embedder itself) and "write"."""
+    "embed" (reported by the embedder itself) and "write". parse_workers > 1 parses in worker
+    processes (only from the setup page's / command line's build, see parallel.py)."""
     t0 = time.time()
     t_start = time.perf_counter()                       # reading + parsing + linking, for the speed record
     files, unknown, secret_files = collect_files(cfg)
     hashes = {}
     sources = {}
-    for i, (rel, ab, lang) in enumerate(files):
+    progress("read", 0, len(files))
+    for i, (rel, lang, raw, sha) in enumerate(parallel.io_map(_read, files, cfg.io_workers)):
         progress("read", i, len(files))
-        try:
-            raw = ab.read_bytes()
-        except OSError:
+        if raw is None:
             continue
         if len(raw) > cfg.max_file_bytes:
             log("WARN", f"  skipping {rel}: larger than {cfg.max_file_bytes} bytes")
             continue
         if _NOT_INDEXED_MARK in raw[:300]:         # framework's own instruction templates
             continue
-        hashes[rel] = hashlib.sha256(raw).hexdigest()
+        hashes[rel] = sha
         sources[rel] = (raw.decode("utf-8", "replace"), lang)
     fp = cfg.fingerprint(model_sha)
     peer_sig = _peer_signature(cfg)
@@ -205,24 +244,24 @@ def build(cfg: IndexConfig, store: Store, embedder, model_sha: str, log=lambda *
     trees: dict[str, Node] = {}
     texts: dict[str, str] = {}                          # what was parsed (skip rules and redaction applied)
     redactions = skipped_files = skipped_blocks = 0
+    jobs, fallback = [], []
     for i, (rel, (text, lang)) in enumerate(sources.items()):
-        progress("parse", i, len(sources))
         if st.index_mode.get(rel) == "skip":           # developer's manifest: not indexed at all
             continue
-        if cfg.skip:                                     # developer's skip rules: blanked, line numbers kept
-            text, hits = cfg.skip.apply(text)
-            if hits:
-                skipped_files += 1
-                skipped_blocks += len(hits)
-        text, n = redact(text)
-        redactions += n
-        texts[rel] = text
         lang = st.lang_override.get(rel, lang) if lang in ("c", "cpp") else lang
-        try:
-            trees[rel] = extract(rel, text, lang)
-        except Exception as e:                          # never let one odd file stop the index
-            log("WARN", f"  could not parse {rel}: {type(e).__name__}")
+        jobs.append((rel, text, lang, cfg.skip or None))
+    for (rel, _, _, _), (tree, text, n_skipped, n_redacted, error) in zip(
+            jobs, parallel.parse_map(_parse, jobs, parse_workers, lambda i, n: progress("parse", i, n),
+                                     log=lambda m: (fallback.append(m), log("WARN", m)))):
+        texts[rel] = text
+        redactions += n_redacted
+        if n_skipped:
+            skipped_files += 1
+            skipped_blocks += n_skipped
+        if tree is None:
+            log("WARN", f"  could not parse {rel}: {error}")
             continue
+        trees[rel] = tree
     if secret_files:
         log("WARN", f"  Skipped {secret_files} secret-store file(s)")
     if redactions:
@@ -343,6 +382,7 @@ def build(cfg: IndexConfig, store: Store, embedder, model_sha: str, log=lambda *
                     "(classify them in mcp/config.yaml → file_types)")
     return {"rebuilt": True, "files": len(trees), "nodes": len(all_nodes), "edges": len(edges),
             "embedded": len(new_vecs), "reused": len(cached), "chunking": cfg.chunking,
+            "parallel_fallback": bool(fallback),
             "skipped": {"files": skipped_files, "blocks": skipped_blocks},
             # this computer's real speed, for later time estimates
             "speed": {"parse_seconds": parse_seconds, "parse_bytes": sum(len(t) for t, _ in sources.values()),
